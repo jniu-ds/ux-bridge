@@ -7,6 +7,7 @@ import {
 } from "./project-session-git.js";
 
 const port = Number(process.env.PORT || 4191);
+const host = String(process.env.HOST || "0.0.0.0").trim() || "0.0.0.0";
 const workerToken = String(process.env.UX_BRIDGE_GIT_WORKER_TOKEN || "").trim();
 
 /** @typedef {import("node:http").IncomingMessage} IncomingMessage */
@@ -144,6 +145,6 @@ createServer(async (req, res) => {
       error: error instanceof Error ? error.message : "Git worker request failed.",
     });
   }
-}).listen(port, "127.0.0.1", () => {
-  console.log(`UX Bridge git worker running at http://127.0.0.1:${port}`);
+}).listen(port, host, () => {
+  console.log(`UX Bridge git worker running at http://${host}:${port}`);
 });
