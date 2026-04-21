@@ -7,7 +7,8 @@ import { getProjectWorkspaceRoot } from "./project-files.js";
 /** @import { EditSessionWorkspace, ReviewFileStat, ReviewTotals } from "./types/project-domain.d.ts" */
 
 const execFileAsync = promisify(execFile);
-const SESSION_WORKTREE_ROOT = join(process.cwd(), "project-session-worktrees");
+const SESSION_WORKTREE_ROOT =
+  String(process.env.PROJECT_SESSION_WORKTREES_ROOT || "").trim() || join(process.cwd(), "project-session-worktrees");
 const GIT_USER_NAME = "UX Bridge";
 const GIT_USER_EMAIL = "noreply@uxbridge.local";
 const DEFAULT_BASE_BRANCH = "main";

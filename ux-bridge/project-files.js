@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 /** @import { PageFileMetadata, PagePreview, PageRecord, ProjectRecord, ScaffoldPageOptions, PrototypeLinkRecord } from "./types/project-domain.d.ts" */
 
-const PROJECT_WORKSPACES_ROOT = join(process.cwd(), "project-workspaces");
+const PROJECT_WORKSPACES_ROOT = String(process.env.PROJECT_WORKSPACES_ROOT || "").trim() || join(process.cwd(), "project-workspaces");
 
 function normalizeSlug(value = "", fallback = "page") {
   const slug = String(value || "")
