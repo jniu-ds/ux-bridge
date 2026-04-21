@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en" style="visibility: hidden">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sign In | UX Bridge</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body class="auth-page">
+    <main class="auth-layout">
+      <section class="auth-card">
+        <div class="auth-card__intro">
+          <a class="brand-mark brand-mark--solo" href="./index.html" aria-label="UX Bridge login">
+            <span class="brand-mark__icon" aria-hidden="true">
+              <svg viewBox="0 0 32 32">
+                <path d="M16 4C9.372 4 4 9.372 4 16c0 6.627 5.372 12 12 12 6.627 0 12-5.373 12-12C28 9.372 22.627 4 16 4Z" />
+                <path d="M10.4 16c1.6-4.4 4.1-6.6 5.6-6.6s4 2.2 5.6 6.6c-1.6 4.4-4.1 6.6-5.6 6.6s-4-2.2-5.6-6.6Z" />
+                <path d="M7.5 12.3c3.8.2 6.8 1.4 8.5 3.7-1.7 2.3-4.7 3.5-8.5 3.7" />
+                <path d="M24.5 12.3c-3.8.2-6.8 1.4-8.5 3.7 1.7 2.3 4.7 3.5 8.5 3.7" />
+              </svg>
+            </span>
+          </a>
+          <p class="auth-card__eyebrow">Protected Access</p>
+          <h1>Sign in to UX Bridge</h1>
+          <p class="auth-card__copy">
+            Access is limited to Nu Skin team members using a valid <strong>@nuskin.com</strong> or
+            <strong>@NuSkin.onmicrosoft.com</strong> email address.
+          </p>
+        </div>
+
+        <div class="auth-switcher" role="tablist" aria-label="Authentication mode">
+          <button type="button" class="auth-switcher__tab is-active" data-auth-tab="login" aria-pressed="true">
+            Sign In
+          </button>
+          <button type="button" class="auth-switcher__tab" data-auth-tab="signup" aria-pressed="false">
+            Create Account
+          </button>
+        </div>
+
+        <section class="auth-panel" data-auth-panel="login">
+          <form class="auth-form" data-auth-form="login">
+            <button class="auth-sso" type="button" data-auth-sso hidden>
+              <span class="auth-sso__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24">
+                  <path fill="#f25022" d="M2 3h9v9H2z" />
+                  <path fill="#7fba00" d="M13 3h9v9h-9z" />
+                  <path fill="#00a4ef" d="M2 13h9v9H2z" />
+                  <path fill="#ffb900" d="M13 13h9v9h-9z" />
+                </svg>
+              </span>
+              <span>Continue with Microsoft</span>
+            </button>
+            <div class="auth-divider" aria-hidden="true">
+              <span>or</span>
+            </div>
+            <label class="auth-field">
+              <span>Email</span>
+              <input type="email" name="email" inputmode="email" autocomplete="email" required />
+            </label>
+            <label class="auth-field">
+              <span>Password</span>
+              <input type="password" name="password" autocomplete="current-password" minlength="8" required />
+            </label>
+            <div class="auth-inline">
+              <button class="auth-link" type="button" data-auth-mode-link="forgot">Forgot password?</button>
+            </div>
+            <p class="auth-status" data-auth-status aria-live="polite"></p>
+            <button class="auth-submit" type="submit">Sign In</button>
+          </form>
+        </section>
+
+        <section class="auth-panel" data-auth-panel="signup" hidden>
+          <form class="auth-form" data-auth-form="signup">
+            <button class="auth-sso" type="button" data-auth-sso hidden>
+              <span class="auth-sso__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24">
+                  <path fill="#f25022" d="M2 3h9v9H2z" />
+                  <path fill="#7fba00" d="M13 3h9v9h-9z" />
+                  <path fill="#00a4ef" d="M2 13h9v9H2z" />
+                  <path fill="#ffb900" d="M13 13h9v9h-9z" />
+                </svg>
+              </span>
+              <span>Continue with Microsoft</span>
+            </button>
+            <div class="auth-divider" aria-hidden="true">
+              <span>or create an account with email</span>
+            </div>
+            <div class="auth-grid">
+              <label class="auth-field">
+                <span>First Name</span>
+                <input type="text" name="firstName" autocomplete="given-name" required />
+              </label>
+              <label class="auth-field">
+                <span>Last Name</span>
+                <input type="text" name="lastName" autocomplete="family-name" required />
+              </label>
+            </div>
+            <label class="auth-field">
+              <span>Nu Skin Email</span>
+              <input type="email" name="email" inputmode="email" autocomplete="email" required />
+            </label>
+            <label class="auth-field">
+              <span>Create Password</span>
+              <input type="password" name="password" autocomplete="new-password" minlength="8" required />
+            </label>
+            <p class="auth-hint">
+              Use at least 8 characters with an uppercase letter, lowercase letter, number, and special character.
+            </p>
+            <p class="auth-status" data-auth-status aria-live="polite"></p>
+            <button class="auth-submit" type="submit">Create Account</button>
+          </form>
+        </section>
+
+        <section class="auth-panel" data-auth-panel="forgot" hidden>
+          <form class="auth-form" data-auth-form="requestPasswordReset">
+            <label class="auth-field">
+              <span>Nu Skin Email</span>
+              <input type="email" name="email" inputmode="email" autocomplete="email" required />
+            </label>
+            <p class="auth-hint">
+              Enter your Nu Skin email and we’ll send you a password reset link if the account exists.
+            </p>
+            <p class="auth-status" data-auth-status aria-live="polite"></p>
+            <button class="auth-submit" type="submit">Send Reset Link</button>
+            <button class="auth-secondary" type="button" data-auth-mode-link="login">Back to Sign In</button>
+          </form>
+        </section>
+      </section>
+    </main>
+  </body>
+</html>

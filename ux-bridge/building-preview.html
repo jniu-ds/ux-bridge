@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en" style="visibility: hidden">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>UX Bridge | Brand Affiliate Building</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body
+    class="bridge-body bridge-body--project"
+    data-project-key="brand-affiliate-mobile"
+    data-page-key="building"
+    data-page-label="Building overview"
+  >
+    <div class="bridge-layout bridge-layout--project" data-bridge-shell hidden>
+      <aside class="bridge-sidebar" data-bridge-sidebar>
+        <a class="bridge-sidebar__brand" href="./projects.html" data-home-link="true" aria-label="UX Bridge home">
+          <span class="bridge-sidebar__brand-mark">B</span>
+          <span>
+            <strong>UX Bridge</strong>
+            <small>Project workspace</small>
+          </span>
+        </a>
+
+        <nav class="bridge-sidebar__nav" aria-label="Project pages">
+          <a class="bridge-sidebar__link" href="./project-overview.html" data-project-page-key="overview">
+            <span class="bridge-sidebar__label">Project Overview</span>
+          </a>
+          <div class="bridge-sidebar__nav-divider" aria-hidden="true"></div>
+          <p class="bridge-sidebar__project-label bridge-sidebar__nav-label">Pages</p>
+          <div class="bridge-sidebar__nav-pages" data-project-nav-pages>
+            <div class="bridge-sidebar__nav-item" data-project-page-item="building">
+              <a class="bridge-sidebar__link is-active" href="./building-preview.html" data-project-page-key="building">
+                <span class="bridge-sidebar__drag" draggable="true" aria-label="Reorder Building page" role="button" tabindex="0">
+                  <svg viewBox="0 0 20 20" aria-hidden="true">
+                    <circle cx="7" cy="6" r="1.2" />
+                    <circle cx="13" cy="6" r="1.2" />
+                    <circle cx="7" cy="10" r="1.2" />
+                    <circle cx="13" cy="10" r="1.2" />
+                    <circle cx="7" cy="14" r="1.2" />
+                    <circle cx="13" cy="14" r="1.2" />
+                  </svg>
+                </span>
+                <span class="bridge-sidebar__label">Building</span>
+              </a>
+            </div>
+            <div class="bridge-sidebar__nav-item" data-project-page-item="l1-bonus">
+              <a class="bridge-sidebar__link" href="./l1-bonus-preview.html" data-project-page-key="l1-bonus">
+                <span class="bridge-sidebar__drag" draggable="true" aria-label="Reorder L1 Bonus page" role="button" tabindex="0">
+                  <svg viewBox="0 0 20 20" aria-hidden="true">
+                    <circle cx="7" cy="6" r="1.2" />
+                    <circle cx="13" cy="6" r="1.2" />
+                    <circle cx="7" cy="10" r="1.2" />
+                    <circle cx="13" cy="10" r="1.2" />
+                    <circle cx="7" cy="14" r="1.2" />
+                    <circle cx="13" cy="14" r="1.2" />
+                  </svg>
+                </span>
+                <span class="bridge-sidebar__label">L1 Bonus</span>
+              </a>
+            </div>
+            <div class="bridge-sidebar__nav-item" data-project-page-item="l1-l2-bonus">
+              <a class="bridge-sidebar__link" href="./l1-l2-bonus-preview.html" data-project-page-key="l1-l2-bonus">
+                <span class="bridge-sidebar__drag" draggable="true" aria-label="Reorder L1/L2 Bonus page" role="button" tabindex="0">
+                  <svg viewBox="0 0 20 20" aria-hidden="true">
+                    <circle cx="7" cy="6" r="1.2" />
+                    <circle cx="13" cy="6" r="1.2" />
+                    <circle cx="7" cy="10" r="1.2" />
+                    <circle cx="13" cy="10" r="1.2" />
+                    <circle cx="7" cy="14" r="1.2" />
+                    <circle cx="13" cy="14" r="1.2" />
+                  </svg>
+                </span>
+                <span class="bridge-sidebar__label">L1/L2 Bonus</span>
+              </a>
+            </div>
+          </div>
+        </nav>
+      </aside>
+
+      <button class="bridge-sidebar-backdrop" type="button" aria-label="Close navigation" data-nav-backdrop></button>
+
+      <section class="bridge-main bridge-main--project">
+        <header class="bridge-project-toolbar">
+          <div class="bridge-project-toolbar__heading">
+            <button class="bridge-nav-toggle" type="button" aria-label="Open navigation" aria-expanded="false" data-nav-toggle>
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M4 7h16" />
+                <path d="M4 12h16" />
+                <path d="M4 17h16" />
+              </svg>
+            </button>
+            <div>
+              <p class="bridge-back-link">
+                <a href="./projects.html" data-home-link="true">Projects</a>
+                <span>|</span>
+                <span data-project-name>Brand Affiliate Mobile</span>
+              </p>
+              <h1 data-static-project-page-title>Building overview</h1>
+            </div>
+          </div>
+          <div class="preview-scale-bar preview-scale-bar--header">
+            <div class="preview-scale-select" data-preview-scale>
+              <span class="sr-only">Preview scale</span>
+              <button
+                class="preview-scale-trigger"
+                type="button"
+                data-preview-scale-trigger
+                aria-label="Preview scale"
+                aria-haspopup="menu"
+                aria-expanded="false"
+              >
+                <span class="preview-scale-trigger__icon" aria-hidden="true"></span>
+                <span class="preview-scale-select__label" data-preview-scale-label>Fit</span>
+                <span class="preview-scale-trigger__chevron" aria-hidden="true"></span>
+              </button>
+              <div class="preview-scale-menu" data-preview-scale-menu role="menu" hidden>
+                <button type="button" class="preview-scale-menu__item" data-preview-scale-option="fit" role="menuitemradio" aria-checked="true">Fit</button>
+                <button type="button" class="preview-scale-menu__item" data-preview-scale-option="0.25" role="menuitemradio" aria-checked="false">25%</button>
+                <button type="button" class="preview-scale-menu__item" data-preview-scale-option="0.5" role="menuitemradio" aria-checked="false">50%</button>
+                <button type="button" class="preview-scale-menu__item" data-preview-scale-option="0.75" role="menuitemradio" aria-checked="false">75%</button>
+                <button type="button" class="preview-scale-menu__item" data-preview-scale-option="1" role="menuitemradio" aria-checked="false">Original (375x812)</button>
+                <button type="button" class="preview-scale-menu__item" data-preview-scale-option="2" role="menuitemradio" aria-checked="false">200%</button>
+              </div>
+            </div>
+          </div>
+          <div class="bridge-project-toolbar__actions" data-header-actions></div>
+        </header>
+        <div class="bridge-project-side-actions" data-side-actions></div>
+
+        <main class="app-shell">
+      <div class="phone-frame-wrap">
+        <section class="phone-frame">
+        <header class="screen-top">
+          <a class="brand-mark" href="./projects.html" data-home-link="true" aria-label="Go to UX Bridge home">
+            <span class="brand-mark__icon" aria-hidden="true">
+              <svg viewBox="0 0 32 32">
+                <path d="M16 4C9.372 4 4 9.372 4 16c0 6.627 5.372 12 12 12 6.627 0 12-5.373 12-12C28 9.372 22.627 4 16 4Z" />
+                <path d="M10.4 16c1.6-4.4 4.1-6.6 5.6-6.6s4 2.2 5.6 6.6c-1.6 4.4-4.1 6.6-5.6 6.6s-4-2.2-5.6-6.6Z" />
+                <path d="M7.5 12.3c3.8.2 6.8 1.4 8.5 3.7-1.7 2.3-4.7 3.5-8.5 3.7" />
+                <path d="M24.5 12.3c-3.8.2-6.8 1.4-8.5 3.7 1.7 2.3 4.7 3.5 8.5 3.7" />
+              </svg>
+            </span>
+            <span class="brand-mark__label">BA</span>
+          </a>
+          <div class="screen-top__meta">
+            <span class="screen-top__eyebrow">Dashboard</span>
+            <h1>Brand Affiliate</h1>
+          </div>
+          <button class="icon-button" type="button" aria-label="Open section details">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="11" />
+              <path d="M9 7.5L14 12L9 16.5" />
+            </svg>
+          </button>
+        </header>
+
+        <section class="section-card section-card--hero">
+          <div class="eyebrow-row">
+            <p class="eyebrow-row__label">Building</p>
+            <p class="eyebrow-row__tag">Live mobile preview</p>
+          </div>
+
+          <div class="earnings-block">
+            <p class="earnings-block__total">
+              Estimated earnings:
+              <span>$198</span>
+            </p>
+            <p class="earnings-block__copy">
+              You’re currently earning <strong>8%</strong> on your <strong>L1+L2 SV</strong>
+            </p>
+          </div>
+
+          <div class="ring-card">
+            <div class="progress-ring" style="--progress: 75">
+              <div class="progress-ring__inner">
+                <span class="progress-ring__label">L1 SV</span>
+                <strong>1,500</strong>
+              </div>
+            </div>
+          </div>
+
+          <div class="tiers-summary">
+            <button class="summary-toggle" id="tiers-toggle" type="button" aria-expanded="false" aria-controls="bonus-tiers-panel">
+              <span>Brand Affiliate Bonus Tiers</span>
+              <svg viewBox="0 0 20 20" aria-hidden="true">
+                <path d="M4 7.5L10 13.5L16 7.5" />
+              </svg>
+            </button>
+            <div class="tier-pills" id="tier-pills" aria-label="Brand Affiliate bonus tiers"></div>
+          </div>
+        </section>
+
+        <section class="section-card section-card--panel">
+          <div class="section-heading">
+            <div>
+              <p class="section-heading__eyebrow">Bonus tiers</p>
+              <h2>Projected earnings at each milestone</h2>
+            </div>
+          </div>
+
+          <div class="bonus-tiers-panel" id="bonus-tiers-panel" hidden></div>
+        </section>
+
+        <section class="section-card section-card--panel">
+          <div class="section-heading">
+            <div>
+              <p class="section-heading__eyebrow">Incentives</p>
+              <h2>What unlocks next</h2>
+            </div>
+          </div>
+
+          <div class="cards-stack" id="incentive-cards"></div>
+        </section>
+        </section>
+      </div>
+      <aside class="comments-panel" data-comments-root></aside>
+        </main>
+      </section>
+    </div>
+
+    <script src="./auth-gate.js"></script>
+    <script src="./capture-mode.js"></script>
+    <script src="./viewport-scale.js"></script>
+    <script src="./action-rail-icons.js"></script>
+    <script src="./comments-panel.js"></script>
+    <script src="./viewer-presence.js"></script>
+    <script type="module" src="./building-preview.js"></script>
+  </body>
+</html>

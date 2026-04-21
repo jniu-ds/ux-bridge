@@ -1,0 +1,14 @@
+var e=document.querySelectorAll(`.estimated-earnings`),t=window.brandAffiliateCustomizer,n=new URLSearchParams(window.location.search).get(`earnings`);n===`collapsed`&&document.body.classList.add(`earnings-collapsed`),n===`expanded`&&document.body.classList.add(`earnings-expanded`);function r(e){n===`collapsed`&&e.classList.remove(`is-open`),n===`expanded`&&e.classList.add(`is-open`)}function i(e){let t=e.querySelector(`.estimated-earnings__money-icon`),n=e.classList.contains(`is-open`);e.setAttribute(`aria-expanded`,n?`true`:`false`),t&&(t.src=n?e.dataset.moneyExpanded:e.dataset.moneyCollapsed)}function a(e){let t=String(e??``).replaceAll(`$`,``).trim();return t?`$${t}`:`$0.00`}function o(e,t){if(!t)return;let n=e.querySelector(`.estimated-earnings__amount`),r=e.querySelector(`.estimated-earnings__expand-label`),i=e.querySelector(`.estimated-earnings__breakdown`);n&&(n.textContent=a(t.amount)),r&&(r.textContent=t.label),i&&(i.innerHTML=t.rows.filter(e=>e.visible).map(e=>e.sublabel?.trim()?`
+            <div class="estimated-earnings__row estimated-earnings__row--stacked">
+              <div>
+                <span>${e.label}</span>
+                <small>${e.sublabel}</small>
+              </div>
+              <strong>${a(e.value)}</strong>
+            </div>
+          `:`
+          <div class="estimated-earnings__row">
+            <span>${e.label}</span>
+            <strong>${a(e.value)}</strong>
+          </div>
+        `).join(``))}function s(e,t,n=!1){let r=e.querySelector(`.estimated-earnings__body`),a=()=>{e.classList.remove(`is-animating`),r.style.height=t?`auto`:`0px`,e.dataset.animating=`false`,i(e)};if(n){e.classList.toggle(`is-open`,t),r.style.height=t?`auto`:`0px`,i(e),a();return}r.getAnimations?.().forEach(e=>e.cancel()),e.dataset.animating=`true`,e.classList.add(`is-animating`);let o=r.getBoundingClientRect().height;r.style.height=`${o}px`,t?(e.classList.add(`is-open`),i(e),requestAnimationFrame(()=>{r.style.height=`${r.scrollHeight}px`})):(e.classList.remove(`is-open`),i(e),requestAnimationFrame(()=>{r.style.height=`0px`}));let s=e=>{e.target!==r||e.propertyName!==`height`||(r.removeEventListener(`transitionend`,s),a())};r.addEventListener(`transitionend`,s)}e.forEach(e=>{r(e),o(e,t?.getState().estimatedEarnings),i(e),e.addEventListener(`click`,()=>{e.dataset.animating!==`true`&&s(e,!e.classList.contains(`is-open`))}),e.addEventListener(`keydown`,t=>{e.dataset.animating!==`true`&&(t.key!==`Enter`&&t.key!==` `||(t.preventDefault(),s(e,!e.classList.contains(`is-open`))))}),requestAnimationFrame(()=>{r(e),s(e,e.classList.contains(`is-open`),!0)})}),t?.subscribe(t=>{e.forEach(e=>{o(e,t.estimatedEarnings)})});

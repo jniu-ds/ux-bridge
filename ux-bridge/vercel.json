@@ -1,0 +1,79 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "cleanUrls": false,
+  "trailingSlash": false,
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "redirects": [
+    {
+      "source": "/:path*",
+      "has": [
+        {
+          "type": "host",
+          "value": "brand-affiliate-mobile.vercel.app"
+        }
+      ],
+      "destination": "https://uxbridge.io/:path*",
+      "permanent": true
+    },
+    {
+      "source": "/:path*",
+      "has": [
+        {
+          "type": "host",
+          "value": "brand-affiliate-mobile-jniu-8746s-projects.vercel.app"
+        }
+      ],
+      "destination": "https://uxbridge.io/:path*",
+      "permanent": true
+    },
+    {
+      "source": "/:path*",
+      "has": [
+        {
+          "type": "host",
+          "value": "brand-affiliate-mobile-jniu-8746-jniu-8746s-projects.vercel.app"
+        }
+      ],
+      "destination": "https://uxbridge.io/:path*",
+      "permanent": true
+    }
+  ],
+  "rewrites": [
+    {
+      "source": "/((?!api/|assets/|favicon.ico).*)",
+      "destination": "/index.html"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/(project-overview|building-preview|l1-bonus-preview|l1-l2-bonus-preview|workspace-page).html",
+      "has": [
+        {
+          "type": "query",
+          "key": "table-thumb",
+          "value": "1"
+        },
+        {
+          "type": "query",
+          "key": "thumb-load"
+        }
+      ],
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        }
+      ]
+    },
+    {
+      "source": "/(.*).(css|js)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-store"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en" style="visibility: hidden">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>UX Bridge</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body class="bridge-body">
+    <div class="bridge-layout" data-bridge-shell hidden>
+      <aside class="bridge-sidebar">
+        <a class="bridge-sidebar__brand" href="./projects.html" data-home-link="true" aria-label="UX Bridge home">
+          <span class="bridge-sidebar__brand-mark">B</span>
+          <span>
+            <strong>UX Bridge</strong>
+            <small>Project workspace</small>
+          </span>
+        </a>
+
+        <nav class="bridge-sidebar__nav" aria-label="Main navigation">
+          <a class="bridge-sidebar__link is-active" href="./projects.html" data-home-link="true">
+            <span>Projects</span>
+          </a>
+          <a class="bridge-sidebar__link" href="./user-management.html" data-admin-link hidden data-admin-only="true">
+            <span>Admin</span>
+          </a>
+        </nav>
+
+        <div class="bridge-sidebar__user-menu">
+          <button class="bridge-sidebar__user-trigger" type="button" aria-haspopup="menu">
+            <span class="bridge-sidebar__user-avatar" data-auth-user-avatar aria-hidden="true">U</span>
+            <span class="bridge-sidebar__user-meta">
+              <strong data-auth-user-name>User</strong>
+              <span data-auth-user-email>user@nuskin.com</span>
+            </span>
+          </button>
+          <div class="bridge-sidebar__user-popover" role="menu" aria-label="User menu">
+            <a class="bridge-sidebar__user-menu-item" href="./profile.html" data-profile-link="true" role="menuitem">
+              Profile
+            </a>
+            <button class="bridge-sidebar__user-menu-item" type="button" data-auth-logout role="menuitem">
+              Sign out
+            </button>
+          </div>
+        </div>
+      </aside>
+
+      <main class="bridge-main bridge-main--admin">
+        <section class="bridge-hero">
+          <div class="bridge-hero__head">
+            <div class="bridge-hero__copy">
+              <p class="bridge-hero__eyebrow">UX Bridge</p>
+              <h1>Projects</h1>
+              <p>Open a project or start a new one.</p>
+            </div>
+            <div class="bridge-hero__actions" data-projects-hero-actions></div>
+          </div>
+        </section>
+
+        <section class="bridge-projects" data-projects-root>
+          <article class="bridge-project-card">
+            <div class="bridge-project-card__meta">
+              <p class="bridge-project-card__eyebrow">Loading</p>
+              <h2>Loading projects…</h2>
+            </div>
+          </article>
+        </section>
+      </main>
+    </div>
+
+    <script src="./auth-gate.js"></script>
+  </body>
+</html>

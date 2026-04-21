@@ -1,0 +1,40 @@
+{
+  "name": "ux-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build && node scripts/postbuild-spa-routes.mjs",
+    "typecheck": "tsc -p tsconfig.typecheck.json",
+    "db:migrate": "node scripts/db-migrate.mjs",
+    "db:status": "node scripts/db-status.mjs",
+    "db:backfill": "node scripts/db-backfill.mjs",
+    "secrets:backfill-vault": "node scripts/secret-vault-backfill.mjs",
+    "start": "node server.js",
+    "git-worker:start": "node project-session-worker-server.js",
+    "codex:bridge": "node codex-app-bridge.js",
+    "prestart": "npm run build",
+    "dev": "vite --host 127.0.0.1 --port 4173",
+    "capture": "node scripts/capture.mjs",
+    "capture:l1": "node scripts/capture.mjs l1-bonus-preview.html screenshots/l1-bonus.png",
+    "capture:l1l2": "node scripts/capture.mjs l1-l2-bonus-preview.html screenshots/l1-l2-bonus.png",
+    "capture:building": "node scripts/capture.mjs building-preview.html screenshots/building.png",
+    "diff": "node scripts/diff.mjs"
+  },
+  "dependencies": {
+    "@vercel/blob": "^2.3.3",
+    "@vitejs/plugin-react": "^6.0.1",
+    "html-to-image": "^1.11.13",
+    "postgres": "^3.4.9",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
+    "react-router-dom": "^7.14.0",
+    "vite": "^8.0.8"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "typescript": "^6.0.2"
+  }
+}

@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en" style="visibility: hidden">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>UX Bridge | Project Page</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body class="bridge-body bridge-body--project" data-dynamic-project="true">
+    <div class="bridge-layout bridge-layout--project" data-bridge-shell hidden>
+      <aside class="bridge-sidebar" data-bridge-sidebar>
+        <a class="bridge-sidebar__back" href="./projects.html" data-home-link="true" aria-label="Back to Projects">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M15 5 8 12l7 7"></path>
+            <path d="M9 12h11"></path>
+          </svg>
+          <span>Back to Projects</span>
+        </a>
+
+        <nav class="bridge-sidebar__nav" aria-label="Project pages">
+          <p class="bridge-sidebar__project-label bridge-sidebar__nav-label">Pages</p>
+          <div class="bridge-sidebar__nav-pages" data-project-nav-pages></div>
+          <button class="bridge-sidebar__add-page" type="button" data-add-project-page>Add Page</button>
+        </nav>
+      </aside>
+
+      <button class="bridge-sidebar-backdrop" type="button" aria-label="Close navigation" data-nav-backdrop></button>
+
+      <section class="bridge-main bridge-main--project">
+        <header class="bridge-project-toolbar">
+          <div class="bridge-project-toolbar__heading">
+            <button class="bridge-nav-toggle" type="button" aria-label="Open navigation" aria-expanded="false" data-nav-toggle>
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M4 7h16" />
+                <path d="M4 12h16" />
+                <path d="M4 17h16" />
+              </svg>
+            </button>
+            <div>
+              <p class="bridge-back-link">
+                <span data-project-name>Project</span>
+              </p>
+              <div class="bridge-project-page-title" data-page-title-shell>
+                <h1 data-project-page-title>Page</h1>
+                <button
+                  class="bridge-inline-edit-trigger bridge-project-page-title__edit"
+                  type="button"
+                  aria-label="Edit page name"
+                  data-edit-page-name
+                  hidden
+                >
+                  <span class="bridge-inline-edit-trigger__tooltip" aria-hidden="true">Edit</span>
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M3 17.25V21h3.75L18.81 8.94l-3.75-3.75L3 17.25Z" />
+                    <path d="M14.06 4.19l3.75 3.75" />
+                  </svg>
+                </button>
+                <div class="bridge-project-page-title__editor" data-page-title-editor hidden>
+                  <textarea
+                    class="bridge-project-page-title__input"
+                    rows="1"
+                    aria-label="Page name"
+                    data-page-title-input
+                  ></textarea>
+                  <button
+                    class="bridge-project-page-title__save"
+                    type="button"
+                    aria-label="Save page name"
+                    data-save-page-name
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M5 12.5l4.2 4.2L19 7" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="preview-scale-bar preview-scale-bar--header">
+            <div class="preview-scale-select" data-preview-scale>
+              <span class="sr-only">Preview scale</span>
+              <button
+                class="preview-scale-trigger"
+                type="button"
+                data-preview-scale-trigger
+                aria-label="Preview scale"
+                aria-haspopup="menu"
+                aria-expanded="false"
+              >
+                <span class="preview-scale-trigger__icon" aria-hidden="true"></span>
+                <span class="preview-scale-select__label" data-preview-scale-label>Fit</span>
+                <span class="preview-scale-trigger__chevron" aria-hidden="true"></span>
+              </button>
+              <div class="preview-scale-menu" data-preview-scale-menu role="menu" hidden>
+                <button type="button" class="preview-scale-menu__item" data-preview-scale-option="fit" role="menuitemradio" aria-checked="true">Fit</button>
+                <button type="button" class="preview-scale-menu__item" data-preview-scale-option="0.25" role="menuitemradio" aria-checked="false">25%</button>
+                <button type="button" class="preview-scale-menu__item" data-preview-scale-option="0.5" role="menuitemradio" aria-checked="false">50%</button>
+                <button type="button" class="preview-scale-menu__item" data-preview-scale-option="0.75" role="menuitemradio" aria-checked="false">75%</button>
+                <button type="button" class="preview-scale-menu__item" data-preview-scale-option="1" role="menuitemradio" aria-checked="false">Original (375x812)</button>
+                <button type="button" class="preview-scale-menu__item" data-preview-scale-option="2" role="menuitemradio" aria-checked="false">200%</button>
+              </div>
+            </div>
+          </div>
+          <div class="bridge-project-toolbar__actions" data-header-actions></div>
+        </header>
+        <div class="bridge-project-side-actions" data-side-actions></div>
+
+        <main class="app-shell">
+          <div class="phone-frame-wrap">
+            <section class="phone-frame">
+              <section class="mobile-page mobile-page--empty">
+                <header class="empty-mobile-taskbar" aria-hidden="true">
+                  <span class="empty-mobile-taskbar__time">9:41</span>
+                  <span class="empty-mobile-taskbar__sensor"></span>
+                  <div class="empty-mobile-taskbar__status">
+                    <span class="empty-mobile-taskbar__signal" aria-hidden="true">
+                      <span></span>
+                      <span></span>
+                      <span></span>
+                      <span></span>
+                    </span>
+                    <span class="empty-mobile-taskbar__wifi" aria-hidden="true"></span>
+                    <span class="empty-mobile-taskbar__battery" aria-hidden="true">
+                      <span class="empty-mobile-taskbar__battery-level"></span>
+                    </span>
+                  </div>
+                </header>
+
+                <section class="empty-mobile-shell" data-empty-mobile-shell>
+                  <p class="empty-mobile-shell__eyebrow">Empty mobile shell</p>
+                  <h2 data-empty-shell-page-title>Page</h2>
+                  <p>Start building this page with Codex when you’re ready.</p>
+                  <div class="empty-mobile-shell__actions">
+                    <button type="button" class="empty-mobile-shell__cta" data-vibe-launch>Edit with Codex</button>
+                    <button type="button" class="empty-mobile-shell__cta empty-mobile-shell__cta--secondary">
+                      Import from Figma
+                    </button>
+                  </div>
+                </section>
+
+                <section class="vibe-mobile-stage" data-vibe-mobile-stage hidden>
+                  <style data-vibe-mobile-style></style>
+                  <div class="vibe-mobile-stage__render" data-vibe-mobile-render></div>
+                </section>
+              </section>
+            </section>
+          </div>
+        </main>
+        <aside class="vibe-panel" data-vibe-root></aside>
+        <aside class="customizer-panel" data-customizer-root></aside>
+        <aside class="comments-panel" data-comments-root></aside>
+      </section>
+    </div>
+
+    <script src="./auth-gate.js"></script>
+    <script src="./capture-mode.js"></script>
+    <script src="./viewport-scale.js"></script>
+    <script src="./project-page-runtime.js"></script>
+    <script src="./action-rail-icons.js"></script>
+    <script src="./vibe-drawer.js"></script>
+    <script src="./customizer.js"></script>
+    <script src="./comments-panel.js"></script>
+    <script src="./viewer-presence.js"></script>
+  </body>
+</html>

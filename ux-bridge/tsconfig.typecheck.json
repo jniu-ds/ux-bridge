@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "lib": ["ES2022"],
+    "types": ["node"]
+  },
+  "include": [
+    "./project-files.js",
+    "./project-session-git.js",
+    "./project-session-worker.js",
+    "./project-session-worker-server.js",
+    "./types/**/*.d.ts"
+  ]
+}
