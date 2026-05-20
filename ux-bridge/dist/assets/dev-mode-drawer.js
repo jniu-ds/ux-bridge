@@ -47,11 +47,11 @@
       opacity: 0;
       transform: translateX(8px);
       transition: opacity 0.18s ease, right 0.24s cubic-bezier(.22,1,.36,1), transform 0.24s cubic-bezier(.22,1,.36,1);
-      border-left: 1px solid rgba(37, 37, 37, 0.14);
-      border-right: 1px solid rgba(37, 37, 37, 0.08);
-      background: rgba(255, 255, 255, 0.94);
+      border-left: 1px solid rgba(148, 163, 184, 0.18);
+      border-right: 1px solid rgba(15, 23, 42, 0.8);
+      background: #0f172a;
       backdrop-filter: blur(18px);
-      box-shadow: -18px 0 38px rgba(38, 44, 78, 0.12);
+      box-shadow: -18px 0 38px rgba(2, 6, 23, 0.34);
     }
 
     body.preview-dev-open .preview-dev-panel {
@@ -63,16 +63,16 @@
     body.breakpoint-specific-active .preview-dev-panel,
     .preview-dev-panel.is-breakpoint-active {
       background:
-        linear-gradient(135deg, #a429ec14 0%, #a429ec0f 100%),
-        #ffffffe0;
-      border-color: #a429ec2e;
+        linear-gradient(135deg, rgba(164, 41, 236, 0.2) 0%, rgba(164, 41, 236, 0.08) 100%),
+        #111827;
+      border-color: rgba(164, 41, 236, 0.38);
     }
 
     .preview-dev-panel__header {
       display: grid;
       gap: 12px;
       padding: 18px 16px 12px;
-      border-bottom: 1px solid rgba(37, 37, 37, 0.1);
+      border-bottom: 1px solid rgba(148, 163, 184, 0.16);
     }
 
     .preview-dev-panel__title-row {
@@ -84,7 +84,7 @@
 
     .preview-dev-panel__eyebrow {
       margin: 0;
-      color: #7b8397;
+      color: #94a3b8;
       font-size: 11px;
       font-weight: 800;
       letter-spacing: 0.16em;
@@ -94,7 +94,7 @@
 
     .preview-dev-panel__title {
       margin: 2px 0 0;
-      color: #111827;
+      color: #f8fafc;
       font-size: 20px;
       font-weight: 800;
       line-height: 1.1;
@@ -106,7 +106,7 @@
       height: 38px;
       border: 1px solid transparent;
       border-radius: 999px;
-      color: #64748b;
+      color: #94a3b8;
       background: transparent;
       display: grid;
       place-items: center;
@@ -115,9 +115,9 @@
 
     .preview-dev-panel__close:hover,
     .preview-dev-panel__close:focus-visible {
-      color: #111827;
-      background: rgba(255, 255, 255, 0.78);
-      border-color: rgba(37, 37, 37, 0.12);
+      color: #f8fafc;
+      background: rgba(148, 163, 184, 0.14);
+      border-color: rgba(148, 163, 184, 0.2);
     }
 
     .preview-dev-panel__close svg,
@@ -136,9 +136,9 @@
       grid-template-columns: repeat(var(--preview-dev-tab-count, 3), minmax(0, 1fr));
       gap: 4px;
       padding: 4px;
-      border: 1px solid rgba(37, 37, 37, 0.1);
+      border: 1px solid rgba(148, 163, 184, 0.16);
       border-radius: 12px;
-      background: rgba(255, 255, 255, 0.7);
+      background: rgba(15, 23, 42, 0.62);
     }
 
     .preview-dev-panel__tab {
@@ -146,7 +146,7 @@
       border: 0;
       border-radius: 9px;
       padding: 8px 6px;
-      color: #64748b;
+      color: #94a3b8;
       background: transparent;
       font-size: 12px;
       font-weight: 800;
@@ -154,13 +154,13 @@
     }
 
     .preview-dev-panel__tab.is-active {
-      color: #2563eb;
-      background: rgba(37, 99, 235, 0.12);
+      color: #dbeafe;
+      background: rgba(37, 99, 235, 0.34);
     }
 
     .preview-dev-panel.is-breakpoint-active .preview-dev-panel__tab.is-active {
-      color: #a429ec;
-      background: rgba(164, 41, 236, 0.14);
+      color: #f3e8ff;
+      background: rgba(164, 41, 236, 0.34);
     }
 
     .preview-dev-panel__body {
@@ -168,7 +168,7 @@
       position: relative;
       overflow: hidden;
       display: block;
-      background: rgba(255, 255, 255, 0.72);
+      background: #020617;
     }
 
     .preview-dev-panel__code,
@@ -193,7 +193,7 @@
 
     .preview-dev-panel__code {
       pointer-events: none;
-      color: #111827;
+      color: #dbeafe;
       background: transparent;
     }
 
@@ -203,60 +203,60 @@
 
     .preview-dev-panel__token--tag,
     .preview-dev-panel__token--keyword {
-      color: #2563eb;
+      color: #60a5fa;
       font-weight: 700;
     }
 
     .preview-dev-panel__token--attr,
     .preview-dev-panel__token--property {
-      color: #7c3aed;
+      color: #c084fc;
     }
 
     .preview-dev-panel__token--string,
     .preview-dev-panel__token--value {
-      color: #059669;
+      color: #34d399;
     }
 
     .preview-dev-panel__token--number {
-      color: #c2410c;
+      color: #fbbf24;
     }
 
     .preview-dev-panel__token--comment {
-      color: #94a3b8;
+      color: #64748b;
       font-style: italic;
     }
 
     .preview-dev-panel__editor {
       resize: none;
       color: transparent;
-      caret-color: #111827;
+      caret-color: #f8fafc;
       background: transparent;
       outline: none;
       -webkit-text-fill-color: transparent;
     }
 
     .preview-dev-panel.is-breakpoint-active .preview-dev-panel__editor {
-      caret-color: #6f13a3;
+      caret-color: #f3e8ff;
     }
 
     .preview-dev-panel__footer {
       display: grid;
       gap: 10px;
       padding: 12px 16px 16px;
-      border-top: 1px solid rgba(37, 37, 37, 0.1);
-      background: rgba(255, 255, 255, 0.56);
+      border-top: 1px solid rgba(148, 163, 184, 0.16);
+      background: rgba(15, 23, 42, 0.86);
     }
 
     .preview-dev-panel__status {
       min-height: 16px;
-      color: #64748b;
+      color: #94a3b8;
       font-size: 12px;
       font-weight: 700;
       line-height: 1.3;
     }
 
     .preview-dev-panel__status.is-error {
-      color: #dc2626;
+      color: #f87171;
     }
 
     .preview-dev-panel__actions {
@@ -267,11 +267,11 @@
 
     .preview-dev-panel__button {
       min-height: 36px;
-      border: 1px solid rgba(37, 37, 37, 0.12);
+      border: 1px solid rgba(148, 163, 184, 0.2);
       border-radius: 999px;
       padding: 0 13px;
-      color: #111827;
-      background: rgba(255, 255, 255, 0.82);
+      color: #e2e8f0;
+      background: rgba(30, 41, 59, 0.92);
       font-size: 13px;
       font-weight: 800;
     }
@@ -369,9 +369,7 @@
           return `<span class="preview-dev-panel__token--comment">${escapeHtml(match)}</span>`;
         }
 
-        return escapeHtml(match)
-          .replace(/^(&lt;\/?)([A-Za-z][\w:-]*)/, `$1<span class="preview-dev-panel__token--tag">$2</span>`)
-          .replace(/([A-Za-z_:][\w:.-]*)(=)(&quot;.*?&quot;|&#39;.*?&#39;|[^\s&]+)?/g, `<span class="preview-dev-panel__token--attr">$1</span>$2<span class="preview-dev-panel__token--string">$3</span>`);
+        return `<span class="preview-dev-panel__token--tag">${escapeHtml(match)}</span>`;
       },
     );
   }
@@ -449,6 +447,44 @@
     return highlightHtml(value);
   }
 
+  function formatHtmlForEditor(value) {
+    const source = String(value || "").trim();
+
+    if (!source) {
+      return "";
+    }
+
+    const block = source
+      .replace(/>\s+</g, ">\n<")
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+    const inlineTags = new Set(["a", "b", "br", "code", "em", "i", "img", "input", "label", "path", "span", "strong"]);
+    let depth = 0;
+
+    return block
+      .map((line) => {
+        const closing = /^<\//.test(line);
+        const tagMatch = line.match(/^<\/?([A-Za-z][\w:-]*)/);
+        const tagName = String(tagMatch?.[1] || "").toLowerCase();
+        const selfClosing = /\/>$/.test(line) || /^<(area|base|br|col|embed|hr|img|input|link|meta|param|source|track|wbr)\b/i.test(line);
+        const compact = inlineTags.has(tagName) && !line.includes("\n");
+
+        if (closing) {
+          depth = Math.max(0, depth - 1);
+        }
+
+        const formatted = `${"  ".repeat(depth)}${line}`;
+
+        if (!closing && !selfClosing && !compact && /^</.test(line) && !/<\/[A-Za-z][\w:-]*>$/.test(line)) {
+          depth += 1;
+        }
+
+        return formatted;
+      })
+      .join("\n");
+  }
+
   function getPreview() {
     return state.page?.preview || state.page?.vibe?.appliedDraft || {};
   }
@@ -485,7 +521,7 @@
       return JSON.stringify(preview.breakpointOverrides || {}, null, 2);
     }
 
-    return String(preview.html || "");
+    return formatHtmlForEditor(preview.html || "");
   }
 
   function syncModeToBreakpointState({ preserveDirty = false } = {}) {
