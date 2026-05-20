@@ -1,0 +1,21 @@
+body.breakpoint-specific-active .bridge-project-side-actions {
+  background:
+    linear-gradient(135deg, #a429ec14 0%, #a429ec0f 100%),
+    #ffffffe0 !important;
+  border-left-color: #a429ec2e !important;
+}
+
+body.breakpoint-specific-active .bridge-project-side-actions .bridge-action-rail-button.is-active,
+body.breakpoint-specific-active .bridge-project-side-actions .customizer-drawer-toggle.is-active,
+body.breakpoint-specific-active .bridge-project-side-actions .comments-drawer-toggle.is-active,
+body.breakpoint-specific-active .bridge-project-side-actions .uploads-drawer-toggle.is-active,
+body.breakpoint-specific-active .bridge-project-side-actions .vibe-drawer-toggle.is-active,
+body.breakpoint-specific-active.comments-open .bridge-project-side-actions .comments-drawer-toggle,
+body.breakpoint-specific-active.uploads-open .bridge-project-side-actions .uploads-drawer-toggle,
+body.breakpoint-specific-active.customizer-open .bridge-project-side-actions .customizer-drawer-toggle,
+body.breakpoint-specific-active.vibe-open .bridge-project-side-actions .vibe-drawer-toggle,
+body.breakpoint-specific-active.inspector-open .bridge-project-side-actions .inspector-rail-toggle {
+  color: #a429ec !important;
+  background: #a429ec1a !important;
+  border-color: #a429ec36 !important;
+}
