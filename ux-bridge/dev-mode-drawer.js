@@ -24,6 +24,13 @@
     previewHoveredHtmlLine: -1,
     selectedHtmlLine: -1,
     activePreviewHoverElement: null,
+    autosaveTimer: 0,
+    saveRequestId: 0,
+    pendingAutosavePayload: null,
+    codeHistory: [],
+    codeHistoryIndex: -1,
+    codeHistoryMode: "",
+    codeHistoryLine: -1,
   };
   let previewStateObserver = null;
   let previewHoverOverlay = null;
@@ -47,7 +54,7 @@
       bottom: 0;
       z-index: 1315;
       display: grid;
-      grid-template-rows: auto minmax(0, 1fr) auto;
+      grid-template-rows: auto minmax(0, 1fr);
       width: var(--preview-dev-panel-width, 300px);
       max-width: var(--preview-dev-panel-width, 300px);
       box-sizing: border-box;
@@ -711,6 +718,79 @@
     return formatHtmlForEditor(preview.html || "");
   }
 
+  function getEditorLineFromOffset(value, offset) {
+    return String(value || "").slice(0, Math.max(0, offset || 0)).split("\n").length - 1;
+  }
+
+  function resetCodeHistory(value = state.editorValue) {
+    state.codeHistory = [{ value: String(value || ""), line: -1 }];
+    state.codeHistoryIndex = 0;
+    state.codeHistoryMode = state.mode;
+    state.codeHistoryLine = -1;
+  }
+
+  function commitCodeHistory(value, line = -1) {
+    const nextValue = String(value || "");
+
+    if (state.codeHistoryMode !== state.mode) {
+      resetCodeHistory(nextValue);
+      state.codeHistory[0].line = line;
+      state.codeHistoryLine = line;
+      return;
+    }
+
+    const current = state.codeHistory[state.codeHistoryIndex];
+
+    if (current?.value === nextValue) {
+      state.codeHistoryLine = line;
+      return;
+    }
+
+    if (state.codeHistoryIndex < state.codeHistory.length - 1) {
+      state.codeHistory = state.codeHistory.slice(0, state.codeHistoryIndex + 1);
+    }
+
+    if (current && current.line === line && line >= 0) {
+      state.codeHistory[state.codeHistoryIndex] = { value: nextValue, line };
+    } else {
+      state.codeHistory.push({ value: nextValue, line });
+      state.codeHistoryIndex = state.codeHistory.length - 1;
+    }
+
+    state.codeHistoryLine = line;
+  }
+
+  function applyCodeHistoryStep(direction, editor) {
+    if (state.codeHistoryMode !== state.mode || state.codeHistory.length <= 1) {
+      return false;
+    }
+
+    const nextIndex = Math.max(0, Math.min(state.codeHistory.length - 1, state.codeHistoryIndex + direction));
+
+    if (nextIndex === state.codeHistoryIndex) {
+      return false;
+    }
+
+    state.codeHistoryIndex = nextIndex;
+    state.editorValue = state.codeHistory[state.codeHistoryIndex]?.value || "";
+    state.dirty = true;
+    state.error = "";
+    state.status = "";
+
+    if (editor instanceof HTMLTextAreaElement) {
+      const scrollTop = editor.scrollTop;
+      const scrollLeft = editor.scrollLeft;
+      editor.value = state.editorValue;
+      editor.scrollTop = scrollTop;
+      editor.scrollLeft = scrollLeft;
+    }
+
+    syncHighlightText();
+    applyLivePreview();
+    scheduleAutosave();
+    return true;
+  }
+
   function syncModeToBreakpointState({ preserveDirty = false } = {}) {
     const tabs = getModeTabs();
 
@@ -722,6 +802,7 @@
     if (!preserveDirty || !state.dirty) {
       state.editorValue = getContentForMode(state.mode);
       state.dirty = false;
+      resetCodeHistory();
     }
   }
 
@@ -1297,7 +1378,8 @@
     state.editorValue = lines.join("\n");
     state.dirty = true;
     state.error = "";
-    state.status = "Unsaved changes";
+    state.status = "";
+    commitCodeHistory(state.editorValue, lineIndex);
 
     if (editor instanceof HTMLTextAreaElement) {
       const scrollTop = editor.scrollTop;
@@ -1310,7 +1392,160 @@
 
     syncHighlightText();
     syncHighlightScroll();
-    setStatus("Unsaved changes");
+    applyLivePreview();
+    scheduleAutosave();
+  }
+
+  function buildPreviewFromEditor() {
+    const preview = getPreview();
+    const nextPreview = {
+      ...preview,
+      html: String(preview.html || ""),
+      css: String(preview.css || ""),
+      js: String(preview.js || ""),
+      stageStyle: String(preview.stageStyle || ""),
+      breakpointOverrides: preview.breakpointOverrides || {},
+    };
+
+    if (state.mode === "html") {
+      nextPreview.html = state.editorValue;
+    } else if (state.mode === "css") {
+      nextPreview.css = state.editorValue;
+    } else if (state.mode === "js") {
+      nextPreview.js = state.editorValue;
+    } else if (state.mode === "overrides") {
+      nextPreview.breakpointOverrides = JSON.parse(state.editorValue || "{}");
+    }
+
+    return nextPreview;
+  }
+
+  function updateLocalPreview(nextPreview) {
+    if (!state.page || !nextPreview) {
+      return;
+    }
+
+    state.page.preview = nextPreview;
+    state.page.hasContent = Boolean(nextPreview.html);
+    state.page.vibe = {
+      ...(state.page.vibe || {}),
+      status: "applied",
+      appliedDraft: nextPreview,
+      summary: nextPreview.summary || state.page.vibe?.summary || "",
+    };
+  }
+
+  function cleanupLivePreviewScript(renderRoot) {
+    const cleanup = renderRoot?.__uxBridgePreviewCleanup;
+
+    if (typeof cleanup === "function") {
+      try {
+        cleanup();
+      } catch (error) {
+        console.warn("[dev-mode] preview.js cleanup failed", error);
+      }
+    }
+
+    if (renderRoot) {
+      renderRoot.__uxBridgePreviewCleanup = null;
+    }
+  }
+
+  function runLivePreviewScript(renderRoot, nextPreview) {
+    cleanupLivePreviewScript(renderRoot);
+
+    const previewJs = String(nextPreview?.js || "").trim();
+
+    if (!renderRoot || !previewJs) {
+      return;
+    }
+
+    const root = renderRoot.firstElementChild instanceof HTMLElement ? renderRoot.firstElementChild : renderRoot;
+
+    try {
+      const cleanup = new Function("root", "page", "project", "api", previewJs)(root, state.page, state.project, {});
+
+      if (typeof cleanup === "function") {
+        renderRoot.__uxBridgePreviewCleanup = cleanup;
+      }
+    } catch (error) {
+      console.warn("[dev-mode] preview.js failed", error);
+    }
+  }
+
+  function renderLivePreview(nextPreview) {
+    const mobilePage = document.querySelector(".mobile-page");
+    const emptyShell = document.querySelector("[data-empty-mobile-shell]");
+    const stage = document.querySelector("[data-vibe-mobile-stage]");
+    const style = document.querySelector("[data-vibe-mobile-style]");
+    const renderRoot = document.querySelector("[data-vibe-mobile-render]");
+
+    if (!mobilePage || !emptyShell || !stage || !style || !renderRoot) {
+      return;
+    }
+
+    const hasContent = Boolean(nextPreview?.html);
+    mobilePage.classList.toggle("mobile-page--empty", !hasContent);
+    emptyShell.hidden = hasContent;
+    stage.hidden = !hasContent;
+
+    if (!hasContent) {
+      cleanupLivePreviewScript(renderRoot);
+      style.textContent = "";
+      renderRoot.innerHTML = "";
+      return;
+    }
+
+    style.textContent = String(nextPreview.css || "");
+    renderRoot.innerHTML = String(nextPreview.html || "");
+    runLivePreviewScript(renderRoot, nextPreview);
+  }
+
+  function applyLivePreview() {
+    let nextPreview;
+
+    try {
+      nextPreview = buildPreviewFromEditor();
+    } catch (error) {
+      state.error = error instanceof Error ? error.message : "Overrides must be valid JSON.";
+      return false;
+    }
+
+    state.error = "";
+    updateLocalPreview(nextPreview);
+    renderLivePreview(nextPreview);
+    window.dispatchEvent(
+      new CustomEvent("uxbridge:preview-code-live-update", {
+        detail: {
+          projectId: state.project?.id || projectId,
+          pageId: state.page?.id || requestedPageId || document.body.dataset.pageKey || "",
+          preview: nextPreview,
+        },
+      }),
+    );
+    return true;
+  }
+
+  function scheduleAutosave() {
+    try {
+      state.pendingAutosavePayload = {
+        ...getSavePayload(),
+        __mode: state.mode,
+        __value: state.editorValue,
+      };
+    } catch (error) {
+      state.error = error instanceof Error ? error.message : "Overrides must be valid JSON.";
+      return;
+    }
+
+    if (state.autosaveTimer) {
+      window.clearTimeout(state.autosaveTimer);
+    }
+
+    state.autosaveTimer = window.setTimeout(() => {
+      state.autosaveTimer = 0;
+      void autosave();
+    }, 450);
   }
 
   function selectPreviewElementForHtmlLine(line) {
@@ -1398,17 +1633,6 @@
         <pre class="preview-dev-panel__code" data-preview-dev-code aria-hidden="true"><code>${highlightCode(state.editorValue, state.mode)}\n</code></pre>
         <textarea class="preview-dev-panel__editor" data-preview-dev-editor spellcheck="false" aria-label="${escapeHtml(state.mode)} editor">${escapeHtml(state.editorValue)}</textarea>
       </div>
-      <footer class="preview-dev-panel__footer">
-        <div class="preview-dev-panel__status${state.error ? " is-error" : ""}" data-preview-dev-status>
-          ${escapeHtml(state.error || state.status || (state.dirty ? "Unsaved changes" : ""))}
-        </div>
-        <div class="preview-dev-panel__actions">
-          <button type="button" class="preview-dev-panel__button" data-preview-dev-revert>Revert</button>
-          <button type="button" class="preview-dev-panel__button preview-dev-panel__button--primary" data-preview-dev-save ${state.saving ? "disabled" : ""}>
-            ${state.saving ? "Saving" : "Save"}
-          </button>
-        </div>
-      </footer>
     `;
 
     syncToggleState();
@@ -1548,23 +1772,9 @@
       state.dirty = false;
       state.error = "";
       state.status = "";
+      resetCodeHistory();
       render();
       return;
-    }
-
-    if (target.closest("[data-preview-dev-revert]")) {
-      event.preventDefault();
-      state.editorValue = getContentForMode(state.mode);
-      state.dirty = false;
-      state.error = "";
-      state.status = "Reverted";
-      render();
-      return;
-    }
-
-    if (target.closest("[data-preview-dev-save]")) {
-      event.preventDefault();
-      void save();
     }
 
     if (target instanceof HTMLTextAreaElement && target.matches("[data-preview-dev-editor]") && state.mode === "html") {
@@ -1592,14 +1802,10 @@
     state.dirty = true;
     state.status = "";
     state.error = "";
+    commitCodeHistory(state.editorValue, getEditorLineFromOffset(target.value, target.selectionStart || 0));
     syncHighlightText();
-
-    const status = panel.querySelector("[data-preview-dev-status]");
-
-    if (status) {
-      status.textContent = "Unsaved changes";
-      status.classList.remove("is-error");
-    }
+    applyLivePreview();
+    scheduleAutosave();
   });
 
   panel.addEventListener("scroll", (event) => {
@@ -1717,9 +1923,15 @@
       return;
     }
 
-    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z") {
       event.preventDefault();
-      void save();
+      applyCodeHistoryStep(event.shiftKey ? 1 : -1, target);
+      return;
+    }
+
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "y") {
+      event.preventDefault();
+      applyCodeHistoryStep(1, target);
       return;
     }
 
@@ -1762,7 +1974,7 @@
     return payload;
   }
 
-  async function save() {
+  async function autosave() {
     if (!state.page || !state.project || state.saving) {
       return;
     }
@@ -1770,18 +1982,24 @@
     let payload;
 
     try {
-      payload = getSavePayload();
+      payload = state.pendingAutosavePayload || getSavePayload();
     } catch (error) {
       state.error = error instanceof Error ? error.message : "Overrides must be valid JSON.";
       state.status = "";
-      render();
       return;
     }
 
+    const savedMode = payload.__mode || state.mode;
+    const savedValue = payload.__value ?? state.editorValue;
+    delete payload.__mode;
+    delete payload.__value;
+    state.pendingAutosavePayload = null;
+
+    const requestId = state.saveRequestId + 1;
     state.saving = true;
     state.error = "";
     state.status = "Saving";
-    render();
+    state.saveRequestId = requestId;
 
     try {
       const response = await fetch(PROJECTS_API, {
@@ -1796,17 +2014,28 @@
         throw new Error(result?.error || "Unable to save preview code.");
       }
 
+      if (requestId !== state.saveRequestId) {
+        return;
+      }
+
+      const canMarkClean = state.mode === savedMode && state.editorValue === savedValue;
+      const wasDirty = state.dirty;
+      if (canMarkClean) {
+        state.dirty = false;
+      }
       applyProject(result.project, payload.page);
-      state.dirty = false;
+      state.dirty = !canMarkClean && wasDirty;
+      if (canMarkClean) {
+        state.dirty = false;
+      }
       state.status = "Saved";
-      window.dispatchEvent(new CustomEvent("uxbridge:project-runtime-sync", { detail: { project: result.project } }));
     } catch (error) {
       state.error = error instanceof Error ? error.message : "Unable to save preview code.";
       state.status = "";
     } finally {
-      state.saving = false;
-      syncModeToBreakpointState();
-      render();
+      if (requestId === state.saveRequestId) {
+        state.saving = false;
+      }
     }
   }
 

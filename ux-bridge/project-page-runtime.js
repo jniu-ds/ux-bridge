@@ -686,4 +686,26 @@
 
     syncProjectView(project, state.currentPage?.id);
   });
+
+  window.addEventListener("uxbridge:preview-code-live-update", (event) => {
+    const detail = event.detail || {};
+    const incomingProjectId = String(detail.projectId || "").trim().toLowerCase();
+    const incomingPageId = String(detail.pageId || "").trim().toLowerCase();
+    const currentProjectId = String(state.project?.id || "").trim().toLowerCase();
+    const currentPageId = String(state.currentPage?.id || "").trim().toLowerCase();
+
+    if (!detail.preview || incomingProjectId !== currentProjectId || incomingPageId !== currentPageId) {
+      return;
+    }
+
+    state.currentPage.preview = detail.preview;
+    state.currentPage.hasContent = Boolean(detail.preview.html);
+    state.currentPage.vibe = {
+      ...(state.currentPage.vibe || {}),
+      status: "applied",
+      appliedDraft: detail.preview,
+      summary: detail.preview.summary || state.currentPage.vibe?.summary || "",
+    };
+    renderAppliedVibe(state.currentPage);
+  });
 })();
