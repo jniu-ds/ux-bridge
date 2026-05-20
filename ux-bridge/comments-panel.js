@@ -77,6 +77,11 @@
     body: "",
     mention: null,
     mentionIndex: 0,
+    replyingCommentId: "",
+    replyBody: "",
+    collapsedThreadIds: new Set(),
+    showUnreadOnly: false,
+    activeThreadId: "",
     refreshTimer: null,
     unseenCount: 0,
     editingCommentId: "",
@@ -90,8 +95,11 @@
     pendingAssets: [],
     uploads: [],
     uploadsLoading: false,
+    uploadsSubmitting: false,
+    uploadsDeletingAssetId: "",
     uploadsError: "",
     uploadsDrawerOpen: false,
+    assetFilePickerContext: "comments",
     assetViewerAsset: null,
     assetViewerItems: [],
     assetViewerIndex: 0,
@@ -119,8 +127,12 @@
     }
   }
 
+  function normalizeEmail(value) {
+    return String(value || "").trim().toLowerCase();
+  }
+
   function getCurrentUserEmail() {
-    return String(getKnownUser()?.email || "").trim().toLowerCase();
+    return normalizeEmail(getKnownUser()?.email);
   }
 
   function getSeenStorageKey(pageKey = state.pageKey) {
@@ -220,6 +232,22 @@
     return latestActivity ? new Date(latestActivity).toISOString() : "";
   }
 
+  function getUnseenCountFromIds(ids = []) {
+    const commentIds = Array.isArray(ids) ? ids.map((value) => String(value || "").trim()).filter(Boolean) : [];
+    const lastSeenCommentId = String(state.lastSeenCommentId || "").trim();
+
+    if (!commentIds.length) {
+      return 0;
+    }
+
+    if (!lastSeenCommentId) {
+      return commentIds.length;
+    }
+
+    const lastSeenIndex = commentIds.findIndex((commentId) => commentId === lastSeenCommentId);
+    return lastSeenIndex < 0 ? commentIds.length : Math.max(commentIds.length - (lastSeenIndex + 1), 0);
+  }
+
   function syncCurrentPageActivity() {
     const currentPageSummary = state.pageCommentSummary.get(state.pageKey);
     state.currentPageActivityAt = String(currentPageSummary?.latestActivityAt || "");
@@ -293,7 +321,7 @@
     }
 
     badgeNode = document.createElement("span");
-    badgeNode.className = "bridge-sidebar__comments-badge";
+    badgeNode.className = "bridge-sidebar__comments-badge project-page-strip__comments-badge";
     badgeNode.setAttribute("data-nav-comments-badge", "");
     badgeNode.hidden = true;
     linkNode.append(badgeNode);
@@ -477,6 +505,16 @@
     };
   }
 
+  async function createAssetUploadRecords(fileList) {
+    const files = Array.from(fileList || []).filter(Boolean);
+
+    if (!files.length) {
+      return [];
+    }
+
+    return Promise.all(files.map(async (file) => createPendingAssetRecord(file, await readFileAsDataUrl(file))));
+  }
+
   function formatCommentMeta(comment) {
     const base = formatTimestamp(comment.createdAt);
 
@@ -485,6 +523,126 @@
     }
 
     return base;
+  }
+
+  function getCommentThreadRootId(comment) {
+    return String(comment?.threadRootId || comment?.parentCommentId || comment?.id || "").trim();
+  }
+
+  function getCommentThreadRoot(comment, comments = state.comments) {
+    const rootId = getCommentThreadRootId(comment);
+    return (Array.isArray(comments) ? comments : []).find((entry) => String(entry?.id || "").trim() === rootId) || comment;
+  }
+
+  function getCommentThreadReplies(rootComment, comments = state.comments) {
+    const rootId = String(rootComment?.id || "").trim();
+
+    if (!rootId) {
+      return [];
+    }
+
+    return (Array.isArray(comments) ? comments : []).filter((comment) => {
+      return String(comment?.id || "").trim() !== rootId && getCommentThreadRootId(comment) === rootId;
+    });
+  }
+
+  function getCommentThreadLatestComment(rootComment, comments = state.comments) {
+    const threadComments = [rootComment, ...getCommentThreadReplies(rootComment, comments)].filter(Boolean);
+    return threadComments.reduce((latest, comment) => {
+      if (!latest) {
+        return comment;
+      }
+
+      return commentSeenTimestamp(comment) >= commentSeenTimestamp(latest) ? comment : latest;
+    }, null);
+  }
+
+  function isCommentThreadUnread(rootComment, comments = state.comments) {
+    const latestComment = getCommentThreadLatestComment(rootComment, comments) || rootComment;
+    return commentSeenTimestamp(latestComment) > Number(state.lastSeenAt || 0);
+  }
+
+  function isCommentResolved(comment) {
+    return Boolean(String(comment?.resolvedAt || "").trim());
+  }
+
+  function getThreadLatestActivityTimestamp(rootComment, comments = state.comments) {
+    return commentSeenTimestamp(getCommentThreadLatestComment(rootComment, comments) || rootComment);
+  }
+
+  function buildCommentThreadViews(comments = state.comments) {
+    const rootComments = (Array.isArray(comments) ? comments : []).filter((comment) => {
+      return !String(comment?.parentCommentId || "").trim();
+    });
+
+    return rootComments
+      .map((rootComment) => {
+        const replies = getCommentThreadReplies(rootComment, comments);
+        const latestComment = getCommentThreadLatestComment(rootComment, comments) || rootComment;
+        const latestActivityTimestamp = getThreadLatestActivityTimestamp(rootComment, comments);
+
+        return {
+          rootComment,
+          replies,
+          latestComment,
+          latestActivityTimestamp,
+          replyCount: replies.length,
+          isResolved: isCommentResolved(rootComment),
+          isUnread: isCommentThreadUnread(rootComment, comments),
+          isCollapsed: isThreadCollapsed(rootComment.id),
+        };
+      })
+      .sort((left, right) => {
+        if (right.latestActivityTimestamp !== left.latestActivityTimestamp) {
+          return right.latestActivityTimestamp - left.latestActivityTimestamp;
+        }
+
+        return String(right.rootComment?.id || "").localeCompare(String(left.rootComment?.id || ""));
+      });
+  }
+
+  function isThreadCollapsed(rootCommentId = "") {
+    return state.collapsedThreadIds instanceof Set && state.collapsedThreadIds.has(String(rootCommentId || "").trim());
+  }
+
+  function setThreadCollapsed(rootCommentId = "", collapsed = false) {
+    const normalizedRootId = String(rootCommentId || "").trim();
+
+    if (!normalizedRootId) {
+      return;
+    }
+
+    if (!(state.collapsedThreadIds instanceof Set)) {
+      state.collapsedThreadIds = new Set();
+    }
+
+    if (collapsed) {
+      state.collapsedThreadIds.add(normalizedRootId);
+    } else {
+      state.collapsedThreadIds.delete(normalizedRootId);
+    }
+  }
+
+  function getCommentSelectionTarget(comment, comments = state.comments) {
+    const rootComment = getCommentThreadRoot(comment, comments);
+    return rootComment?.selectionTarget || comment?.selectionTarget || null;
+  }
+
+  function updateCurrentPageSummaryFromComments() {
+    const mentionCommentIds = state.comments
+      .filter((comment) => Array.isArray(comment?.mentions) && comment.mentions.some((mention) => normalizeEmail(mention?.email) === getCurrentUserEmail()))
+      .map((comment) => comment.id);
+
+    state.pageCommentSummary.set(state.pageKey, {
+      commentIds: state.comments.map((comment) => comment.id),
+      latestActivityAt: getLatestActivityAt(state.comments),
+      unreadCount: state.drawerOpen ? 0 : getUnseenCountForComments(state.comments, state.lastSeenAt, false),
+      unreadMentionCount: state.drawerOpen ? 0 : getUnseenCountFromIds(mentionCommentIds),
+      mentionCommentIds,
+      lastSeenCommentId: state.lastSeenCommentId,
+      lastSeenAt: state.lastSeenAt,
+    });
+    syncCurrentPageActivity();
   }
 
   function getCommentsSignature(comments) {
@@ -606,10 +764,11 @@
     commentsRoot.inert = !state.drawerOpen;
     const toggle = document.querySelector("[data-comments-drawer-toggle]");
 
-    if (toggle) {
-      toggle.setAttribute("aria-expanded", state.drawerOpen ? "true" : "false");
-      toggle.setAttribute("aria-hidden", state.drawerOpen ? "true" : "false");
-    }
+  if (toggle) {
+    toggle.setAttribute("aria-expanded", state.drawerOpen ? "true" : "false");
+    toggle.setAttribute("aria-hidden", state.drawerOpen ? "true" : "false");
+    toggle.classList.toggle("is-active", state.drawerOpen);
+  }
 
     syncMobileSheetBackdrop();
   }
@@ -641,16 +800,13 @@
   }
 
   async function queueFiles(fileList) {
-    const files = Array.from(fileList || []).filter(Boolean);
-
-    if (!files.length) {
-      return;
-    }
-
     try {
-      const nextAssets = await Promise.all(
-        files.map(async (file) => createPendingAssetRecord(file, await readFileAsDataUrl(file))),
-      );
+      const nextAssets = await createAssetUploadRecords(fileList);
+
+      if (!nextAssets.length) {
+        return;
+      }
+
       state.pendingAssets = [...state.pendingAssets, ...nextAssets];
       state.error = "";
       render();
@@ -668,10 +824,14 @@
   }
 
   async function uploadPendingAssets() {
+    return uploadAssetRecords(state.pendingAssets);
+  }
+
+  async function uploadAssetRecords(assets) {
     const uploadedAssets = [];
 
     try {
-      for (const asset of state.pendingAssets) {
+      for (const asset of Array.isArray(assets) ? assets : []) {
         const response = await fetch(ASSETS_API, {
           method: "POST",
           credentials: "include",
@@ -701,6 +861,33 @@
     }
 
     return uploadedAssets;
+  }
+
+  function openAssetFilePicker(context = "comments") {
+    state.assetFilePickerContext = context;
+    assetFileInput.click();
+  }
+
+  async function uploadFilesFromAssetsDrawer(fileList) {
+    try {
+      const uploadRecords = await createAssetUploadRecords(fileList);
+
+      if (!uploadRecords.length) {
+        return;
+      }
+
+      state.uploadsSubmitting = true;
+      state.uploadsError = "";
+      renderUploadsDrawer();
+      await uploadAssetRecords(uploadRecords);
+      await fetchAssets({ silent: true });
+    } catch (error) {
+      state.uploadsError = error instanceof Error ? error.message : "Could not upload files.";
+    } finally {
+      state.uploadsSubmitting = false;
+      assetFileInput.value = "";
+      renderUploadsDrawer();
+    }
   }
 
   async function rollbackUploadedAssets(assets) {
@@ -772,10 +959,11 @@
     uploadsRoot.inert = !state.uploadsDrawerOpen;
     const toggle = document.querySelector("[data-uploads-drawer-toggle]");
 
-    if (toggle) {
-      toggle.setAttribute("aria-expanded", state.uploadsDrawerOpen ? "true" : "false");
-      toggle.setAttribute("aria-hidden", state.uploadsDrawerOpen ? "true" : "false");
-    }
+  if (toggle) {
+    toggle.setAttribute("aria-expanded", state.uploadsDrawerOpen ? "true" : "false");
+    toggle.setAttribute("aria-hidden", state.uploadsDrawerOpen ? "true" : "false");
+    toggle.classList.toggle("is-active", state.uploadsDrawerOpen);
+  }
 
     syncMobileSheetBackdrop();
   }
@@ -785,16 +973,8 @@
       return;
     }
 
-    const isMobile = window.innerWidth <= 959;
-    const hasOpenDrawer =
-      document.body.classList.contains("customizer-open") ||
-      document.body.classList.contains("comments-open") ||
-      document.body.classList.contains("uploads-open") ||
-      document.body.classList.contains("vibe-open");
-
-    const shouldShow = isMobile && hasOpenDrawer;
-    mobileSheetBackdrop.hidden = !shouldShow;
-    mobileSheetBackdrop.classList.toggle("is-visible", shouldShow);
+    mobileSheetBackdrop.hidden = true;
+    mobileSheetBackdrop.classList.remove("is-visible");
   }
 
   function setUploadsDrawerOpen(nextOpen, source = "uploads") {
@@ -930,6 +1110,76 @@
     state.assetViewerIndex = 0;
     state.assetViewerScaleMenuOpen = false;
     renderAssetViewer();
+  }
+
+  function pruneDeletedAssetFromState(assetId) {
+    const normalizedAssetId = String(assetId || "").trim();
+
+    if (!normalizedAssetId) {
+      return;
+    }
+
+    state.uploads = state.uploads.filter((asset) => String(asset?.id || "").trim() !== normalizedAssetId);
+    state.comments = state.comments.map((comment) => ({
+      ...comment,
+      assets: (Array.isArray(comment.assets) ? comment.assets : []).filter(
+        (asset) => String(asset?.id || "").trim() !== normalizedAssetId,
+      ),
+    }));
+
+    if (String(state.assetViewerAsset?.id || "").trim() === normalizedAssetId) {
+      closeAssetViewer();
+      return;
+    }
+
+    if (state.assetViewerItems.length) {
+      state.assetViewerItems = state.assetViewerItems.filter(
+        (asset) => String(asset?.id || "").trim() !== normalizedAssetId,
+      );
+      if (state.assetViewerIndex >= state.assetViewerItems.length) {
+        state.assetViewerIndex = Math.max(0, state.assetViewerItems.length - 1);
+      }
+      state.assetViewerAsset = state.assetViewerItems[state.assetViewerIndex] || null;
+      renderAssetViewer();
+    }
+  }
+
+  async function deleteProjectAsset(assetId) {
+    const normalizedAssetId = String(assetId || "").trim();
+
+    if (!normalizedAssetId || state.uploadsDeletingAssetId === normalizedAssetId) {
+      return;
+    }
+
+    state.uploadsDeletingAssetId = normalizedAssetId;
+    state.uploadsError = "";
+    renderUploadsDrawer();
+
+    try {
+      const response = await fetch(ASSETS_API, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "deleteAsset",
+          assetId: normalizedAssetId,
+        }),
+      });
+      const payload = await response.json();
+
+      if (!response.ok || payload?.ok === false) {
+        throw new Error(payload?.error || "Could not delete asset.");
+      }
+
+      pruneDeletedAssetFromState(normalizedAssetId);
+      await Promise.all([fetchAssets({ silent: true }), fetchComments({ silent: true })]);
+    } catch (error) {
+      state.uploadsError = error instanceof Error ? error.message : "Could not delete asset.";
+    } finally {
+      state.uploadsDeletingAssetId = "";
+      render();
+    }
   }
 
   async function fetchComments(options = {}) {
@@ -1217,17 +1467,9 @@
       state.pendingAssets = [];
       state.mention = null;
       state.mentionIndex = 0;
-      state.pageCommentSummary.set(state.pageKey, {
-        commentIds: state.comments.map((comment) => comment.id),
-        latestActivityAt: getLatestActivityAt(state.comments),
-        unreadCount: 0,
-        unreadMentionCount: 0,
-        lastSeenCommentId: state.comments.at(-1)?.id || "",
-        lastSeenAt: commentSeenTimestamp(state.comments.at(-1)),
-      });
-      syncCurrentPageActivity();
       state.lastSeenCommentId = state.comments.at(-1)?.id || "";
       state.lastSeenAt = commentSeenTimestamp(state.comments.at(-1));
+      updateCurrentPageSummaryFromComments();
       renderToggleBadge();
       renderNavCommentBadges();
       void fetchAssets({ silent: true });
@@ -1291,15 +1533,7 @@
       state.editingCommentId = "";
       state.editingCommentBody = "";
       state.busyCommentId = "";
-      state.pageCommentSummary.set(state.pageKey, {
-        commentIds: state.comments.map((comment) => comment.id),
-        latestActivityAt: getLatestActivityAt(state.comments),
-        unreadCount: state.drawerOpen ? 0 : getUnseenCountForComments(state.comments, state.lastSeenAt, false),
-        unreadMentionCount: 0,
-        lastSeenCommentId: state.lastSeenCommentId,
-        lastSeenAt: state.lastSeenAt,
-      });
-      syncCurrentPageActivity();
+      updateCurrentPageSummaryFromComments();
       renderNavCommentBadges();
       render();
     } catch (error) {
@@ -1348,15 +1582,7 @@
       state.shouldStickToBottom = true;
       state.editingCommentId = state.editingCommentId === commentId ? "" : state.editingCommentId;
       state.editingCommentBody = state.editingCommentId ? state.editingCommentBody : "";
-      state.pageCommentSummary.set(state.pageKey, {
-        commentIds: state.comments.map((comment) => comment.id),
-        latestActivityAt: getLatestActivityAt(state.comments),
-        unreadCount: state.drawerOpen ? 0 : getUnseenCountForComments(state.comments, state.lastSeenAt, false),
-        unreadMentionCount: 0,
-        lastSeenCommentId: state.lastSeenCommentId,
-        lastSeenAt: state.lastSeenAt,
-      });
-      syncCurrentPageActivity();
+      updateCurrentPageSummaryFromComments();
       if (state.drawerOpen) {
         await markCommentsSeen();
       } else {
@@ -1368,6 +1594,120 @@
       render();
     } catch (error) {
       state.error = error instanceof Error ? error.message : "Could not delete comment.";
+      state.busyCommentId = "";
+      render();
+    }
+  }
+
+  function startReplyingToComment(comment) {
+    const rootComment = getCommentThreadRoot(comment);
+    state.replyingCommentId = String(rootComment?.id || "").trim();
+    state.activeThreadId = state.replyingCommentId || state.activeThreadId;
+    setThreadCollapsed(state.replyingCommentId, false);
+    state.replyBody = "";
+    state.error = "";
+    render();
+  }
+
+  function stopReplyingToComment() {
+    state.replyingCommentId = "";
+    state.replyBody = "";
+    render();
+  }
+
+  async function submitReply(commentId) {
+    const body = String(state.replyBody || "").trim();
+
+    if (!commentId || !body || state.busyCommentId) {
+      return;
+    }
+
+    state.busyCommentId = commentId;
+    state.error = "";
+    render();
+
+    try {
+      const response = await fetch(COMMENTS_API, {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "reply",
+          project: state.projectKey,
+          page: state.pageKey,
+          commentId,
+          body,
+        }),
+      });
+      const payload = await response.json();
+
+      if (!response.ok || !payload?.ok) {
+        throw new Error(payload?.error || "Could not save reply.");
+      }
+
+      state.comments = Array.isArray(payload.comments) ? payload.comments : state.comments;
+      state.users = Array.isArray(payload.users) ? payload.users : state.users;
+      state.canDeleteAnyComment = Boolean(payload.canDeleteAnyComment);
+      state.replyingCommentId = "";
+      state.replyBody = "";
+      state.busyCommentId = "";
+      state.shouldStickToBottom = true;
+      state.lastSeenCommentId = state.comments.at(-1)?.id || state.lastSeenCommentId;
+      state.lastSeenAt = commentSeenTimestamp(state.comments.at(-1)) || state.lastSeenAt;
+      updateCurrentPageSummaryFromComments();
+      renderToggleBadge();
+      renderNavCommentBadges();
+      render();
+    } catch (error) {
+      state.error = error instanceof Error ? error.message : "Could not save reply.";
+      state.busyCommentId = "";
+      render();
+    }
+  }
+
+  async function updateCommentThreadState(commentId, action, fallbackError) {
+    if (!commentId || state.busyCommentId) {
+      return;
+    }
+
+    state.busyCommentId = commentId;
+    state.error = "";
+    render();
+
+    try {
+      const response = await fetch(COMMENTS_API, {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action,
+          project: state.projectKey,
+          page: state.pageKey,
+          commentId,
+        }),
+      });
+      const payload = await response.json();
+
+      if (!response.ok || !payload?.ok) {
+        throw new Error(payload?.error || fallbackError);
+      }
+
+      state.comments = Array.isArray(payload.comments) ? payload.comments : state.comments;
+      state.users = Array.isArray(payload.users) ? payload.users : state.users;
+      state.canDeleteAnyComment = Boolean(payload.canDeleteAnyComment);
+      state.busyCommentId = "";
+      state.lastSeenCommentId = String(payload.lastSeenCommentId || state.lastSeenCommentId || "");
+      state.lastSeenAt = Number(payload.lastSeenAt) || state.lastSeenAt;
+      updateCurrentPageSummaryFromComments();
+      renderToggleBadge();
+      renderNavCommentBadges();
+      render();
+    } catch (error) {
+      state.error = error instanceof Error ? error.message : fallbackError;
       state.busyCommentId = "";
       render();
     }
@@ -1459,8 +1799,9 @@
     const assetId = String(asset.id || "").trim();
     const safeName = escapeHtml(asset.fileName || "Attachment");
     const pageLabel = escapeHtml(getPageLabelForKey(asset.pageId));
-
-    return `
+    const canDeleteFromUploads = context === "uploads" && !pending;
+    const isDeleting = canDeleteFromUploads && state.uploadsDeletingAssetId === assetId;
+    const cardMarkup = `
       <button
         type="button"
         class="comments-panel__asset-card${compact ? " is-compact" : ""}${pending ? " is-pending" : ""}"
@@ -1490,6 +1831,34 @@
         }
       </button>
     `;
+
+    if (!canDeleteFromUploads) {
+      return cardMarkup;
+    }
+
+    return `
+      <div class="comments-panel__asset-card-shell">
+        ${cardMarkup}
+        <span class="comments-panel__asset-delete-wrap">
+          <button
+            type="button"
+            class="comments-panel__asset-delete"
+            data-uploads-asset-delete="${assetId}"
+            data-tooltip="Delete"
+            aria-label="Delete asset"
+            ${isDeleting ? "disabled" : ""}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M9 4h6"></path>
+              <path d="M4 7h16"></path>
+              <path d="M7 7v11a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V7"></path>
+              <path d="M10 11v5"></path>
+              <path d="M14 11v5"></path>
+            </svg>
+          </button>
+        </span>
+      </div>
+    `;
   }
 
   function renderPendingAssets() {
@@ -1518,6 +1887,351 @@
     `;
   }
 
+  function renderSelectionTarget(comment) {
+    const target = comment?.selectionTarget;
+    const layerPath = String(target?.layerPath || "").trim();
+
+    if (!layerPath) {
+      return "";
+    }
+
+    const label = String(target?.layerLabel || "").trim() || "Referenced layer";
+
+    return `
+      <button
+        type="button"
+        class="comments-panel__selection-target"
+        data-comment-selection-target="${escapeAttribute(layerPath)}"
+        data-comment-selection-page="${escapeAttribute(String(target?.pageId || "").trim().toLowerCase())}"
+        aria-label="Highlight referenced layer"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M4 9.5V6a2 2 0 0 1 2-2h3.5"></path>
+          <path d="M14.5 4H18a2 2 0 0 1 2 2v3.5"></path>
+          <path d="M20 14.5V18a2 2 0 0 1-2 2h-3.5"></path>
+          <path d="M9.5 20H6a2 2 0 0 1-2-2v-3.5"></path>
+        </svg>
+        <span>${escapeHtml(label)}</span>
+      </button>
+    `;
+  }
+
+  function renderReplyComposer(rootComment) {
+    const rootCommentId = String(rootComment?.id || "").trim();
+    const isBusy = state.busyCommentId === rootCommentId;
+
+    if (state.replyingCommentId !== rootCommentId) {
+      return "";
+    }
+
+    return `
+      <div class="comments-panel__reply-composer">
+        <textarea
+          data-comment-reply-input="${rootCommentId}"
+          placeholder="Write a reply"
+        >${escapeHtml(state.replyBody)}</textarea>
+        <div class="comments-panel__reply-actions">
+          <button
+            type="button"
+            class="comments-panel__edit-button comments-panel__edit-button--secondary"
+            data-comment-action="cancel-reply"
+            data-comment-id="${rootCommentId}"
+            ${isBusy ? "disabled" : ""}
+          >Cancel</button>
+          <button
+            type="button"
+            class="comments-panel__edit-button"
+            data-comment-action="submit-reply"
+            data-comment-id="${rootCommentId}"
+            ${isBusy ? "disabled" : ""}
+          >${isBusy ? "Saving…" : "Reply"}</button>
+        </div>
+      </div>
+    `;
+  }
+
+  function renderThreadSummary(threadView) {
+    if (!threadView) {
+      return "";
+    }
+
+    const summaryBits = [];
+    const latestAuthor = String(threadView.latestComment?.author?.fullName || "").trim();
+
+    if (threadView.replyCount) {
+      summaryBits.push(`${threadView.replyCount} ${threadView.replyCount === 1 ? "reply" : "replies"}`);
+    }
+
+    if (latestAuthor) {
+      summaryBits.push(`Latest by ${latestAuthor}`);
+    }
+
+    summaryBits.push(`Updated ${formatTimestamp(threadView.latestComment?.editedAt || threadView.latestComment?.createdAt || threadView.rootComment?.createdAt)}`);
+
+    return `
+      <div class="comments-panel__thread-summary" aria-label="Thread summary">
+        ${summaryBits.map((bit) => `<span>${escapeHtml(bit)}</span>`).join("<span aria-hidden=\"true\">·</span>")}
+      </div>
+    `;
+  }
+
+  function renderThreadToolbar(threadViews) {
+    const unreadCount = threadViews.filter((threadView) => threadView.isUnread && !threadView.isResolved).length;
+    const resolvedCount = threadViews.filter((threadView) => threadView.isResolved).length;
+
+    return `
+      <div class="comments-panel__toolbar">
+        <button
+          type="button"
+          class="comments-panel__filter-toggle${state.showUnreadOnly ? " is-active" : ""}"
+          data-comment-filter="unread"
+          aria-pressed="${state.showUnreadOnly ? "true" : "false"}"
+        >
+          Unread only
+          ${unreadCount ? `<span>${unreadCount}</span>` : ""}
+        </button>
+        ${resolvedCount ? `<p class="comments-panel__toolbar-meta">${resolvedCount} resolved ${resolvedCount === 1 ? "thread" : "threads"}</p>` : ""}
+      </div>
+    `;
+  }
+
+  function renderThreadSection(title, description, threadViews, options = {}) {
+    const { emptyMessage = "" } = options;
+
+    if (!threadViews.length && !emptyMessage) {
+      return "";
+    }
+
+    return `
+      <section class="comments-panel__section">
+        <div class="comments-panel__section-header">
+          <div class="comments-panel__section-copy">
+            <h3>${escapeHtml(title)}</h3>
+            ${description ? `<p>${escapeHtml(description)}</p>` : ""}
+          </div>
+          <span class="comments-panel__section-count">${threadViews.length}</span>
+        </div>
+        ${
+          threadViews.length
+            ? `
+                <div class="comments-panel__section-list">
+                  ${threadViews
+                    .map((threadView) => {
+                      const { rootComment, replies, isCollapsed } = threadView;
+
+                      return `
+                        <section class="comments-panel__thread-group${isCollapsed ? " is-collapsed" : ""}" data-comment-thread-group="${rootComment.id}">
+                          ${renderCommentRow(rootComment, { comments: state.comments, threadView })}
+                        </section>
+                      `;
+                    })
+                    .join("")}
+                </div>
+              `
+            : `<div class="comments-panel__empty">${escapeHtml(emptyMessage)}</div>`
+        }
+      </section>
+    `;
+  }
+
+  function renderCommentRow(comment, options = {}) {
+    const { comments = state.comments, isReply = false, threadView = null, inThreadView = false } = options;
+    const currentUserEmail = getCurrentUserEmail();
+    const isOwn = String(comment.author?.email || "").toLowerCase() === currentUserEmail;
+    const canEdit = isOwn;
+    const canDelete = isOwn || state.canDeleteAnyComment;
+    const isEditing = state.editingCommentId === comment.id;
+    const isBusy = state.busyCommentId === comment.id;
+    const copied = state.copiedCommentId === comment.id;
+    const rootComment = getCommentThreadRoot(comment, comments);
+    const selectionTarget = getCommentSelectionTarget(comment, comments);
+    const targetLayerPath = String(selectionTarget?.layerPath || "").trim();
+    const targetPageId = String(selectionTarget?.pageId || "").trim().toLowerCase();
+    const resolvedState = threadView?.isResolved ?? isCommentResolved(rootComment);
+    const unreadState = threadView?.isUnread ?? isCommentThreadUnread(rootComment, comments);
+    const replyCount = threadView?.replyCount ?? getCommentThreadReplies(rootComment, comments).length;
+
+    const actionMarkup = `
+      <div class="comments-panel__actions" role="menu" aria-label="Comment actions">
+        <button type="button" class="comments-panel__action" data-comment-action="copy" data-comment-id="${comment.id}" aria-label="${copied ? "Copied" : "Copy comment"}" title="${copied ? "Copied" : "Copy"}">
+          ${
+            copied
+              ? `
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M5 12.5 9.2 16.5 19 7.5"></path>
+                </svg>
+              `
+              : `
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <rect x="9" y="9" width="10" height="10" rx="2"></rect>
+                  <path d="M7 15H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v1"></path>
+                </svg>
+              `
+          }
+        </button>
+        ${
+          !isReply
+            ? `
+                <button type="button" class="comments-panel__action" data-comment-action="${resolvedState ? "reopen" : "resolve"}" data-comment-id="${rootComment.id}" aria-label="${resolvedState ? "Reopen comment" : "Resolve comment"}" title="${resolvedState ? "Reopen" : "Resolve"}">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <circle cx="12" cy="12" r="9"></circle>
+                    <path d="M8.5 12 11 14.5 15.5 9.5"></path>
+                  </svg>
+                </button>
+                <button type="button" class="comments-panel__action" data-comment-action="${unreadState ? "mark-read" : "mark-unread"}" data-comment-id="${rootComment.id}" aria-label="${unreadState ? "Mark thread read" : "Mark thread unread"}" title="${unreadState ? "Mark read" : "Mark unread"}">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M4.5 7.5h15"></path>
+                    <path d="M4.5 12h15"></path>
+                    <path d="M4.5 16.5h9"></path>
+                  </svg>
+                </button>
+                <button type="button" class="comments-panel__action" data-comment-action="reply" data-comment-id="${rootComment.id}" aria-label="Reply to comment" title="Reply">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M9 9H5a2 2 0 0 0-2 2v8l4-3h7a2 2 0 0 0 2-2v-1"></path>
+                    <path d="M15 5h4a2 2 0 0 1 2 2v8l-4-3h-2"></path>
+                  </svg>
+                </button>
+              `
+            : ""
+        }
+        ${
+          canEdit
+            ? `
+                <button type="button" class="comments-panel__action" data-comment-action="edit" data-comment-id="${comment.id}" aria-label="Edit comment" title="Edit">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M4 20h4l10.5-10.5a2.12 2.12 0 0 0-3-3L5 17v3Z"></path>
+                    <path d="M13.5 6.5 17.5 10.5"></path>
+                  </svg>
+                </button>
+              `
+            : ""
+        }
+        ${
+          canDelete
+            ? `
+                <button type="button" class="comments-panel__action comments-panel__action--destructive" data-comment-action="delete" data-comment-id="${comment.id}" aria-label="Delete comment" title="Delete" ${isBusy ? "disabled" : ""}>
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M4 7h16"></path>
+                    <path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path>
+                    <path d="M7 7l1 12a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2l1-12"></path>
+                    <path d="M10 11v6"></path>
+                    <path d="M14 11v6"></path>
+                  </svg>
+                </button>
+              `
+            : ""
+        }
+      </div>
+    `;
+
+    return `
+      <article
+        class="comments-panel__item${isOwn ? " is-own" : ""}${isReply ? " is-reply" : ""}${targetLayerPath ? " is-targeted" : ""}${resolvedState ? " is-resolved" : ""}${unreadState ? " is-unread" : ""}"
+        data-comment-id="${comment.id}"
+        ${targetLayerPath ? `data-comment-thread-target="${escapeAttribute(targetLayerPath)}"` : ""}
+        ${targetPageId ? `data-comment-thread-page="${escapeAttribute(targetPageId)}"` : ""}
+      >
+        <div class="comments-panel__message-wrap">
+          ${actionMarkup}
+          <div class="comments-panel__meta-line">
+            <strong>${escapeHtml(comment.author?.fullName || "Unknown user")}</strong>
+            <span>${escapeHtml(formatCommentMeta(comment))}</span>
+            ${isReply ? `<small class="comments-panel__reply-label">Reply</small>` : ""}
+            ${!isReply && resolvedState ? `<small class="comments-panel__status-chip">Resolved</small>` : ""}
+            ${!isReply && unreadState ? `<span class="comments-panel__unread-dot" aria-hidden="true"></span>` : ""}
+          </div>
+          <div class="comments-panel__bubble">
+            ${
+              isEditing
+                ? `
+                  <div class="comments-panel__edit">
+                    <textarea data-comment-edit-input="${comment.id}">${escapeHtml(state.editingCommentBody)}</textarea>
+                    <div class="comments-panel__edit-actions">
+                      <button type="button" class="comments-panel__edit-button comments-panel__edit-button--secondary" data-comment-action="cancel-edit" data-comment-id="${comment.id}" ${isBusy ? "disabled" : ""}>Cancel</button>
+                      <button type="button" class="comments-panel__edit-button" data-comment-action="save-edit" data-comment-id="${comment.id}" ${isBusy ? "disabled" : ""}>${isBusy ? "Saving…" : "Save"}</button>
+                    </div>
+                  </div>
+                `
+                : `
+                    ${!isReply ? renderThreadSummary(threadView || { rootComment, latestComment: getCommentThreadLatestComment(rootComment, comments) || rootComment, replyCount }) : ""}
+                    ${!isReply ? renderSelectionTarget(comment) : ""}
+                    ${comment.body ? `<div class="comments-panel__body">${renderCommentBody(comment.body, comment.mentions || [])}</div>` : ""}
+                    ${renderCommentAssets(comment.assets || [])}
+                    ${
+                      !isReply
+                        ? `
+                            <div class="comments-panel__thread-footer">
+                              <button type="button" class="comments-panel__thread-link" data-comment-action="${replyCount ? "open-thread" : "reply"}" data-comment-id="${rootComment.id}">
+                                ${replyCount ? `${replyCount} ${replyCount === 1 ? "reply" : "replies"}` : "Reply"}
+                              </button>
+                              ${
+                                replyCount && inThreadView
+                                  ? `
+                                      <button type="button" class="comments-panel__thread-link" data-comment-action="close-thread" data-comment-id="${rootComment.id}">
+                                        Back to all comments
+                                      </button>
+                                    `
+                                  : ""
+                              }
+                              <button type="button" class="comments-panel__thread-link" data-comment-action="${resolvedState ? "reopen" : "resolve"}" data-comment-id="${rootComment.id}">
+                                ${resolvedState ? "Reopen" : "Resolve"}
+                              </button>
+                              <button type="button" class="comments-panel__thread-link" data-comment-action="${unreadState ? "mark-read" : "mark-unread"}" data-comment-id="${rootComment.id}">
+                                ${unreadState ? "Mark read" : "Mark unread"}
+                              </button>
+                            </div>
+                          `
+                        : ""
+                    }
+                  `
+            }
+          </div>
+        </div>
+      </article>
+    `;
+  }
+
+  function renderActiveThreadView(threadView) {
+    if (!threadView) {
+      return "";
+    }
+
+    const { rootComment, replies } = threadView;
+
+    return `
+      <section class="comments-panel__thread-detail">
+        <div class="comments-panel__thread-detail-header">
+          <button
+            type="button"
+            class="comments-panel__thread-back"
+            data-comment-action="close-thread"
+            data-comment-id="${rootComment.id}"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M15 18 9 12 15 6"></path>
+            </svg>
+            <span>All comments</span>
+          </button>
+          <div class="comments-panel__thread-detail-copy">
+            <h3>Thread</h3>
+            <p>${escapeHtml(`${1 + replies.length} ${1 + replies.length === 1 ? "comment" : "comments"}`)}</p>
+          </div>
+        </div>
+        <div class="comments-panel__thread-detail-list">
+          ${renderCommentRow(rootComment, { comments: state.comments, threadView, inThreadView: true })}
+          ${
+            replies.length
+              ? `<div class="comments-panel__replies comments-panel__replies--detail">${replies
+                  .map((reply) => renderCommentRow(reply, { comments: state.comments, isReply: true, inThreadView: true }))
+                  .join("")}</div>`
+              : ""
+          }
+          ${renderReplyComposer(rootComment)}
+        </div>
+      </section>
+    `;
+  }
+
   function renderCommentsList() {
     if (state.isLoading) {
       return `<div class="comments-panel__empty">Loading comments…</div>`;
@@ -1531,108 +2245,41 @@
       return `<div class="comments-panel__empty">No comments yet. Start the conversation for this page.</div>`;
     }
 
-    const currentUserEmail = getCurrentUserEmail();
-    return state.comments
-      .map(
-        (comment, index) => `
-          ${(() => {
-            const isOwn = String(comment.author?.email || "").toLowerCase() === currentUserEmail;
-            const canEdit = isOwn;
-            const canDelete = isOwn || state.canDeleteAnyComment;
-            const isEditing = state.editingCommentId === comment.id;
-            const isBusy = state.busyCommentId === comment.id;
-            const copied = state.copiedCommentId === comment.id;
-            const previousComment = state.comments[index - 1];
-            const isGrouped = shouldGroupWithPrevious(comment, previousComment);
-            const actionMarkup = `
-              <div class="comments-panel__actions" role="menu" aria-label="Comment actions">
-                <button type="button" class="comments-panel__action" data-comment-action="copy" data-comment-id="${comment.id}" aria-label="${copied ? "Copied" : "Copy comment"}" title="${copied ? "Copied" : "Copy"}">
-                  ${
-                    copied
-                      ? `
-                        <svg viewBox="0 0 24 24" aria-hidden="true">
-                          <path d="M5 12.5 9.2 16.5 19 7.5"></path>
-                        </svg>
-                      `
-                      : `
-                        <svg viewBox="0 0 24 24" aria-hidden="true">
-                          <rect x="9" y="9" width="10" height="10" rx="2"></rect>
-                          <path d="M7 15H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v1"></path>
-                        </svg>
-                      `
-                  }
-                </button>
-                ${
-                  canEdit
-                    ? `
-                        <button type="button" class="comments-panel__action" data-comment-action="edit" data-comment-id="${comment.id}" aria-label="Edit comment" title="Edit">
-                          <svg viewBox="0 0 24 24" aria-hidden="true">
-                            <path d="M4 20h4l10.5-10.5a2.12 2.12 0 0 0-3-3L5 17v3Z"></path>
-                            <path d="M13.5 6.5 17.5 10.5"></path>
-                          </svg>
-                        </button>
-                      `
-                    : ""
-                }
-                ${
-                  canDelete
-                    ? `
-                        <button type="button" class="comments-panel__action comments-panel__action--destructive" data-comment-action="delete" data-comment-id="${comment.id}" aria-label="Delete comment" title="Delete" ${isBusy ? "disabled" : ""}>
-                          <svg viewBox="0 0 24 24" aria-hidden="true">
-                            <path d="M4 7h16"></path>
-                            <path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path>
-                            <path d="M7 7l1 12a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2l1-12"></path>
-                            <path d="M10 11v6"></path>
-                            <path d="M14 11v6"></path>
-                          </svg>
-                        </button>
-                      `
-                    : ""
-                }
-              </div>
-            `;
+    const threadViews = buildCommentThreadViews(state.comments);
+    const activeThreadView = state.activeThreadId
+      ? threadViews.find((threadView) => String(threadView.rootComment?.id || "").trim() === state.activeThreadId) || null
+      : null;
 
-            return `
-              <article class="comments-panel__item${isOwn ? " is-own" : ""}${isGrouped ? " is-grouped" : ""}" data-comment-id="${comment.id}">
-                <div class="comments-panel__message-wrap">
-                  ${actionMarkup}
-                  ${
-                    isGrouped
-                      ? ""
-                      : `
-                        <div class="comments-panel__meta-line">
-                          <strong>${escapeHtml(comment.author?.fullName || "Unknown user")}</strong>
-                          <span>${escapeHtml(formatCommentMeta(comment))}</span>
-                        </div>
-                      `
-                  }
-                  <div class="comments-panel__bubble">
-                    ${
-                      isEditing
-                        ? `
-                          <div class="comments-panel__edit">
-                            <textarea data-comment-edit-input="${comment.id}">${escapeHtml(state.editingCommentBody)}</textarea>
-                            <div class="comments-panel__edit-actions">
-                              <button type="button" class="comments-panel__edit-button comments-panel__edit-button--secondary" data-comment-action="cancel-edit" data-comment-id="${comment.id}" ${isBusy ? "disabled" : ""}>Cancel</button>
-                              <button type="button" class="comments-panel__edit-button" data-comment-action="save-edit" data-comment-id="${comment.id}" ${isBusy ? "disabled" : ""}>
-                                ${isBusy ? "Saving…" : "Save"}
-                              </button>
-                            </div>
-                          </div>
-                        `
-                        : `
-                            ${comment.body ? `<div class="comments-panel__body">${renderCommentBody(comment.body, comment.mentions || [])}</div>` : ""}
-                            ${renderCommentAssets(comment.assets || [])}
-                          `
-                    }
-                  </div>
-                </div>
-              </article>
-            `;
-          })()}
-        `,
-      )
-      .join("");
+    if (state.activeThreadId && !activeThreadView) {
+      state.activeThreadId = "";
+    }
+
+    if (activeThreadView) {
+      return renderActiveThreadView(activeThreadView);
+    }
+
+    const unreadFilteredThreads = state.showUnreadOnly ? threadViews.filter((threadView) => threadView.isUnread && !threadView.isResolved) : threadViews;
+    const activeThreads = unreadFilteredThreads.filter((threadView) => !threadView.isResolved);
+    const resolvedThreads = state.showUnreadOnly ? [] : threadViews.filter((threadView) => threadView.isResolved);
+
+    return `
+      ${renderThreadToolbar(threadViews)}
+      ${renderThreadSection(
+        state.showUnreadOnly ? "Unread threads" : "Open threads",
+        state.showUnreadOnly ? "Threads that still need attention." : "Active feedback and discussion for this page.",
+        activeThreads,
+        {
+          emptyMessage: state.showUnreadOnly
+            ? "Everything is caught up right now."
+            : "No open threads yet. Start the conversation for this page.",
+        },
+      )}
+      ${
+        !state.showUnreadOnly
+          ? renderThreadSection("Resolved", "Threads that have been closed out.", resolvedThreads)
+          : ""
+      }
+    `;
   }
 
   function nextCommentIdsChanged(previousIds, comments) {
@@ -1739,12 +2386,21 @@
             <h2>Project Assets</h2>
             <p>Browse uploaded files for ${escapeHtml(state.pageLabel)} and the rest of this project.</p>
           </div>
-          <button class="uploads-panel__close" type="button" data-uploads-close aria-label="Close uploads">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M6 6 18 18"></path>
-              <path d="M18 6 6 18"></path>
-            </svg>
-          </button>
+          <div class="uploads-panel__header-actions">
+            <button class="uploads-panel__add" type="button" data-uploads-add ${state.uploadsSubmitting ? "disabled" : ""}>
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 5v14"></path>
+                <path d="M5 12h14"></path>
+              </svg>
+              <span>${state.uploadsSubmitting ? "Uploading…" : "Add files"}</span>
+            </button>
+            <button class="uploads-panel__close" type="button" data-uploads-close aria-label="Close uploads">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M6 6 18 18"></path>
+                <path d="M18 6 6 18"></path>
+              </svg>
+            </button>
+          </div>
         </div>
         <div class="uploads-panel__list" data-uploads-list>
           ${
@@ -1753,7 +2409,7 @@
               : state.uploadsError
               ? `<div class="uploads-panel__empty uploads-panel__empty--error">${escapeHtml(state.uploadsError)}</div>`
               : !state.uploads.length
-              ? `<div class="uploads-panel__empty">No uploads yet. Add attachments from the comments drawer.</div>`
+              ? `<div class="uploads-panel__empty">No assets yet. Add files here to start building the project library for this page.</div>`
               : state.uploads
                   .map(
                     (asset) => `
@@ -1772,9 +2428,21 @@
       setUploadsDrawerOpen(false);
     });
 
+    uploadsRoot.querySelector("[data-uploads-add]")?.addEventListener("click", () => {
+      openAssetFilePicker("uploads");
+    });
+
     uploadsRoot.querySelectorAll("[data-asset-open]").forEach((button) => {
       button.addEventListener("click", () => {
         openAssetViewer(button.getAttribute("data-asset-open"));
+      });
+    });
+
+    uploadsRoot.querySelectorAll("[data-uploads-asset-delete]").forEach((button) => {
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        void deleteProjectAsset(button.getAttribute("data-uploads-asset-delete"));
       });
     });
 
@@ -1964,6 +2632,10 @@
     const preserveTextareaFocus = activeElement?.matches?.("[data-comments-input]");
     const selectionStart = preserveTextareaFocus ? activeElement.selectionStart : null;
     const selectionEnd = preserveTextareaFocus ? activeElement.selectionEnd : null;
+    const replyingCommentId = activeElement?.getAttribute?.("data-comment-reply-input");
+    const preserveReplyFocus = Boolean(replyingCommentId);
+    const replySelectionStart = preserveReplyFocus ? activeElement.selectionStart : null;
+    const replySelectionEnd = preserveReplyFocus ? activeElement.selectionEnd : null;
     const editingCommentId = activeElement?.getAttribute?.("data-comment-edit-input");
     const preserveEditFocus = Boolean(editingCommentId);
     const editSelectionStart = preserveEditFocus ? activeElement.selectionStart : null;
@@ -2056,7 +2728,18 @@
     });
 
     commentsRoot.querySelector("[data-comments-attach]")?.addEventListener("click", () => {
-      assetFileInput.click();
+      openAssetFilePicker("comments");
+    });
+
+    commentsRoot.querySelectorAll("[data-comment-filter]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const filter = button.getAttribute("data-comment-filter");
+
+        if (filter === "unread") {
+          state.showUnreadOnly = !state.showUnreadOnly;
+          render();
+        }
+      });
     });
 
     commentsRoot.querySelectorAll("[data-comment-action]").forEach((button) => {
@@ -2091,6 +2774,85 @@
 
         if (action === "delete") {
           void deleteComment(commentId);
+          return;
+        }
+
+        if (action === "reply") {
+          startReplyingToComment(comment);
+          return;
+        }
+
+        if (action === "open-thread") {
+          const rootComment = getCommentThreadRoot(comment);
+          state.activeThreadId = String(rootComment?.id || "").trim();
+          render();
+          return;
+        }
+
+        if (action === "close-thread") {
+          state.activeThreadId = "";
+          if (state.replyingCommentId === commentId) {
+            state.replyingCommentId = "";
+            state.replyBody = "";
+          }
+          render();
+          return;
+        }
+
+        if (action === "toggle-thread") {
+          const rootComment = getCommentThreadRoot(comment);
+          const rootCommentId = String(rootComment?.id || "").trim();
+          setThreadCollapsed(rootCommentId, !isThreadCollapsed(rootCommentId));
+          render();
+          return;
+        }
+
+        if (action === "cancel-reply") {
+          stopReplyingToComment();
+          return;
+        }
+
+        if (action === "submit-reply") {
+          void submitReply(commentId);
+          return;
+        }
+
+        if (action === "resolve") {
+          void updateCommentThreadState(commentId, "resolve", "Could not resolve comment.");
+          return;
+        }
+
+        if (action === "reopen") {
+          void updateCommentThreadState(commentId, "reopen", "Could not reopen comment.");
+          return;
+        }
+
+        if (action === "mark-read") {
+          void updateCommentThreadState(commentId, "markread", "Could not mark comment read.");
+          return;
+        }
+
+        if (action === "mark-unread") {
+          void updateCommentThreadState(commentId, "markunread", "Could not mark comment unread.");
+        }
+      });
+    });
+
+    commentsRoot.querySelectorAll("[data-comment-reply-input]").forEach((textarea) => {
+      textarea.addEventListener("input", () => {
+        state.replyBody = textarea.value;
+      });
+
+      textarea.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          stopReplyingToComment();
+          return;
+        }
+
+        if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+          event.preventDefault();
+          void submitReply(textarea.getAttribute("data-comment-reply-input"));
         }
       });
     });
@@ -2138,6 +2900,72 @@
       });
     });
 
+    commentsRoot.querySelectorAll("[data-comment-selection-target]").forEach((button) => {
+      const emitHover = () => {
+        window.dispatchEvent(
+          new CustomEvent("uxbridge:comment-selection-hover", {
+            detail: {
+              pageId: String(button.getAttribute("data-comment-selection-page") || "").trim().toLowerCase(),
+              layerPath: String(button.getAttribute("data-comment-selection-target") || "").trim(),
+            },
+          }),
+        );
+      };
+      const emitLeave = () => {
+        window.dispatchEvent(new CustomEvent("uxbridge:comment-selection-leave"));
+      };
+
+      button.addEventListener("mouseenter", emitHover);
+      button.addEventListener("focus", emitHover);
+      button.addEventListener("mouseleave", emitLeave);
+      button.addEventListener("blur", emitLeave);
+    });
+
+    commentsRoot.querySelectorAll("[data-comment-thread-target]").forEach((card) => {
+      const emitHover = () => {
+        window.dispatchEvent(
+          new CustomEvent("uxbridge:comment-selection-hover", {
+            detail: {
+              pageId: String(card.getAttribute("data-comment-thread-page") || "").trim().toLowerCase(),
+              layerPath: String(card.getAttribute("data-comment-thread-target") || "").trim(),
+            },
+          }),
+        );
+      };
+      const emitLeave = () => {
+        window.dispatchEvent(new CustomEvent("uxbridge:comment-selection-leave"));
+      };
+      const emitSelect = (event) => {
+        if (
+          event.target instanceof Element &&
+          event.target.closest(
+            "[data-comment-action], [data-asset-open], [data-pending-asset-remove], [data-comment-edit-input], [data-comment-reply-input], textarea, button, a",
+          )
+        ) {
+          return;
+        }
+
+        window.dispatchEvent(
+          new CustomEvent("uxbridge:comment-selection-select", {
+            detail: {
+              pageId: String(card.getAttribute("data-comment-thread-page") || "").trim().toLowerCase(),
+              layerPath: String(card.getAttribute("data-comment-thread-target") || "").trim(),
+            },
+          }),
+        );
+      };
+
+      card.addEventListener("mouseenter", emitHover);
+      card.addEventListener("focusin", emitHover);
+      card.addEventListener("mouseleave", emitLeave);
+      card.addEventListener("focusout", (event) => {
+        if (!(event.relatedTarget instanceof Node) || !card.contains(event.relatedTarget)) {
+          emitLeave();
+        }
+      });
+      card.addEventListener("click", emitSelect);
+    });
+
     if (preserveTextareaFocus) {
       const nextTextarea = commentsRoot.querySelector("[data-comments-input]");
 
@@ -2168,6 +2996,15 @@
           editSelectionStart ?? state.editingCommentBody.length,
           editSelectionEnd ?? state.editingCommentBody.length,
         );
+      }
+    }
+
+    if (preserveReplyFocus && replyingCommentId) {
+      const nextReplyTextarea = commentsRoot.querySelector(`[data-comment-reply-input="${replyingCommentId}"]`);
+
+      if (nextReplyTextarea) {
+        nextReplyTextarea.focus();
+        nextReplyTextarea.setSelectionRange(replySelectionStart ?? state.replyBody.length, replySelectionEnd ?? state.replyBody.length);
       }
     }
   }
@@ -2265,6 +3102,26 @@
       }
     });
 
+    window.addEventListener("uxbridge:comments-refresh-request", (event) => {
+      const detailProjectId = String(event.detail?.projectId || "").trim().toLowerCase();
+      const detailPageId = String(event.detail?.pageId || "").trim().toLowerCase();
+
+      if (detailProjectId !== String(state.projectKey || "").trim().toLowerCase()) {
+        return;
+      }
+
+      if (detailPageId && detailPageId !== String(state.pageKey || "").trim().toLowerCase()) {
+        return;
+      }
+
+      if (event.detail?.open) {
+        setDrawerOpen(true, "comments");
+      }
+
+      void fetchComments({ silent: false });
+      void fetchProjectSummary();
+    });
+
     if (sideActions) {
       sideActions.append(toggle);
       sideActions.append(uploadsToggle);
@@ -2305,6 +3162,11 @@
   void initWhenReady();
 
   assetFileInput.addEventListener("change", () => {
+    if (state.assetFilePickerContext === "uploads") {
+      void uploadFilesFromAssetsDrawer(assetFileInput.files);
+      return;
+    }
+
     void queueFiles(assetFileInput.files);
   });
 

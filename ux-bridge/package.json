@@ -25,6 +25,7 @@
     "@vercel/blob": "^2.3.3",
     "@vitejs/plugin-react": "^6.0.1",
     "html-to-image": "^1.11.13",
+    "parse5": "^8.0.1",
     "postgres": "^3.4.9",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",

@@ -30,6 +30,7 @@ import {
   writePasswordResetTokenRecord,
   writeUserRecord,
 } from "./db/users.js";
+import { listProjectRecords } from "./db/projects.js";
 import {
   buildDefaultRolePermissionMap,
   getRolePermissionCatalog,
@@ -78,6 +79,12 @@ const INTEGRATION_ENCRYPTION_SECRET =
   process.env.UPSTASH_REDIS_REST_TOKEN ||
   process.env.KV_REST_API_TOKEN ||
   "ux-bridge-local-dev-integration-secret";
+const ADMIN_AI_USAGE_PRICING = {
+  codex: {
+    inputPerMillionUsd: 1.25,
+    outputPerMillionUsd: 10,
+  },
+};
 const AUTH_CACHE_KEY = "__uxBridgeAuthCache__";
 const USER_CACHE_TTL_MS = 30000;
 const SESSION_CACHE_TTL_MS = 30000;
@@ -98,9 +105,8 @@ const AVATAR_COLOR_PALETTE = [
   "#E4E2DC",
 ];
 const TOOL_PROVIDER_CREDENTIAL_MODE = {
-  codex: "user-session",
-  claude: "connector",
-  generic: "token-managed",
+  codex: "organization-managed",
+  claude: "organization-managed",
 };
 
 const REDIS_ENABLED = isRedisConfigured();
@@ -302,8 +308,8 @@ function buildDefaultIntegrations() {
       connected: false,
       accountLabel: "",
       connectedAt: 0,
-      credentialMode: provider.credentialMode || TOOL_PROVIDER_CREDENTIAL_MODE[provider.id] || "user-session",
-      connectionType: "scaffold",
+      credentialMode: provider.credentialMode || TOOL_PROVIDER_CREDENTIAL_MODE[provider.id] || "organization-managed",
+      connectionType: "organization-managed",
       lastVerifiedAt: 0,
     };
     return accumulator;
@@ -1649,6 +1655,91 @@ export function buildUserPayload(user) {
   };
 }
 
+function getCurrentMonthStartTimestamp() {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+}
+
+function estimateAiVerificationCostUsd(verification, providerId = "") {
+  const explicitCost = Number(verification?.estimatedTotalCostUsd);
+  if (Number.isFinite(explicitCost) && explicitCost >= 0) {
+    return explicitCost;
+  }
+
+  const normalizedProviderId = String(providerId || "").trim().toLowerCase();
+  const pricing = ADMIN_AI_USAGE_PRICING[normalizedProviderId];
+  if (!pricing) {
+    return 0;
+  }
+
+  const inputHtmlChars = Number(verification?.inputHtmlChars) || 0;
+  const inputCssChars = Number(verification?.inputCssChars) || 0;
+  const returnedHtmlChars = Number(verification?.returnedHtmlChars) || 0;
+  const returnedCssChars = Number(verification?.returnedCssChars) || 0;
+  const estimatedInputTokens = Math.max(0, Math.round((inputHtmlChars + inputCssChars) / 4));
+  const estimatedOutputTokens = Math.max(0, Math.round((returnedHtmlChars + returnedCssChars) / 4));
+
+  return (
+    (estimatedInputTokens / 1_000_000) * Number(pricing.inputPerMillionUsd || 0) +
+    (estimatedOutputTokens / 1_000_000) * Number(pricing.outputPerMillionUsd || 0)
+  );
+}
+
+function buildAdminAiUsageByEmail(projects = []) {
+  const usageByEmail = new Map();
+  const currentMonthStart = getCurrentMonthStartTimestamp();
+
+  const ensureUsage = (email) => {
+    const normalizedEmail = normalizeEmail(email);
+    if (!normalizedEmail) {
+      return null;
+    }
+
+    if (!usageByEmail.has(normalizedEmail)) {
+      usageByEmail.set(normalizedEmail, {
+        currentMonthEstimatedCostUsd: 0,
+        totalEstimatedCostUsd: 0,
+        currentMonthPromptCount: 0,
+        totalPromptCount: 0,
+      });
+    }
+
+    return usageByEmail.get(normalizedEmail);
+  };
+
+  for (const project of Array.isArray(projects) ? projects : []) {
+    const messages = Array.isArray(project?.codexThread?.messages) ? project.codexThread.messages : [];
+    for (const message of messages) {
+      const role = String(message?.role || "").trim().toLowerCase();
+      const kind = String(message?.kind || "").trim().toLowerCase();
+      const verification = message?.metadata?.verification;
+      const email = normalizeEmail(message?.userId);
+
+      if (role !== "assistant" || kind !== "generation" || !verification || !email) {
+        continue;
+      }
+
+      const usage = ensureUsage(email);
+      if (!usage) {
+        continue;
+      }
+
+      const costUsd = estimateAiVerificationCostUsd(verification, message?.metadata?.providerId);
+      const createdAt = Number(message?.createdAt) || 0;
+
+      usage.totalEstimatedCostUsd += costUsd;
+      usage.totalPromptCount += 1;
+
+      if (createdAt >= currentMonthStart) {
+        usage.currentMonthEstimatedCostUsd += costUsd;
+        usage.currentMonthPromptCount += 1;
+      }
+    }
+  }
+
+  return usageByEmail;
+}
+
 export async function writeUserIntegrationSecret(email, providerId, secretValue, metadata = {}) {
   const normalizedEmail = normalizeEmail(email);
   const normalizedProviderId = String(providerId || "").trim().toLowerCase();
@@ -1935,17 +2026,33 @@ export async function handleAdminUsersRequest(req) {
 
   if (req.method === "GET") {
     const payloadUsers = await listUserDirectory();
-    const [recentAuditEvents, recentOperationalEvents, rolePermissions] = await Promise.all([
+    const [recentAuditEvents, recentOperationalEvents, rolePermissions, projectRecords] = await Promise.all([
       listRecentAuditEvents(20),
       listRecentOperationalEvents(20),
       readRolePermissionMap(),
+      listProjectRecords().catch(() => []),
     ]);
+    const aiUsageByEmail = buildAdminAiUsageByEmail(projectRecords);
+    const usersWithUsage = payloadUsers.map((user) => {
+      const email = normalizeEmail(user.email);
+      const aiUsage = aiUsageByEmail.get(email) || {
+        currentMonthEstimatedCostUsd: 0,
+        totalEstimatedCostUsd: 0,
+        currentMonthPromptCount: 0,
+        totalPromptCount: 0,
+      };
+
+      return {
+        ...user,
+        aiUsage,
+      };
+    });
 
     return {
       status: 200,
       payload: {
         ok: true,
-        users: payloadUsers,
+        users: usersWithUsage,
         roles: USER_ROLES,
         rolePermissions,
         permissionCatalog: getRolePermissionCatalog(),

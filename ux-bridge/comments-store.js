@@ -426,6 +426,61 @@ async function writeComments(project, page, comments) {
   await updateProjectCommentsSummaryPage(project, page, comments);
 }
 
+export async function removeAssetReferencesFromProjectComments(project, assetId) {
+  const normalizedProject = normalizeProject(project);
+  const normalizedAssetId = String(assetId || "").trim();
+
+  if (!normalizedProject || !normalizedAssetId) {
+    return false;
+  }
+
+  const structure = await getProjectStructureById(normalizedProject);
+
+  if (!structure) {
+    return false;
+  }
+
+  const pages = structure.hasOverview
+    ? ["overview", ...structure.pages.map((page) => page.id)]
+    : structure.pages.map((page) => page.id);
+  let changed = false;
+
+  for (const pageId of pages) {
+    const normalizedPage = normalizePage(pageId);
+    const comments = await readComments(normalizedProject, normalizedPage);
+
+    if (!comments.length) {
+      continue;
+    }
+
+    let pageChanged = false;
+    const nextComments = comments.map((comment) => {
+      const nextAssets = (Array.isArray(comment.assets) ? comment.assets : []).filter(
+        (asset) => String(asset?.id || "").trim() !== normalizedAssetId,
+      );
+
+      if (nextAssets.length === (Array.isArray(comment.assets) ? comment.assets.length : 0)) {
+        return comment;
+      }
+
+      pageChanged = true;
+      return {
+        ...comment,
+        assets: nextAssets,
+      };
+    });
+
+    if (!pageChanged) {
+      continue;
+    }
+
+    await writeComments(normalizedProject, normalizedPage, nextComments);
+    changed = true;
+  }
+
+  return changed;
+}
+
 export async function migrateCommentAuthorProfile(previousEmail, nextUserPayload = {}) {
   const fromEmail = String(previousEmail || "").trim().toLowerCase();
   const toEmail = String(nextUserPayload.email || "").trim().toLowerCase();
@@ -526,6 +581,122 @@ function sanitizeCommentAssets(value) {
     .filter((asset) => asset && asset.id && asset.fileName);
 }
 
+function sanitizeCommentSelectionTarget(value) {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const layerPath = String(value.layerPath || "").trim();
+  const layerLabel = String(value.layerLabel || "").trim();
+  const pageId = String(value.pageId || "").trim().toLowerCase();
+
+  if (!layerPath || !pageId) {
+    return null;
+  }
+
+  return {
+    layerPath,
+    layerLabel,
+    pageId,
+  };
+}
+
+function getCommentById(comments = [], commentId = "") {
+  const normalizedCommentId = String(commentId || "").trim();
+
+  if (!normalizedCommentId) {
+    return null;
+  }
+
+  return (Array.isArray(comments) ? comments : []).find((comment) => String(comment?.id || "").trim() === normalizedCommentId) || null;
+}
+
+function getThreadRootComment(comment, comments = []) {
+  if (!comment) {
+    return null;
+  }
+
+  const threadRootId = String(comment.threadRootId || comment.parentCommentId || comment.id || "").trim();
+  return getCommentById(comments, threadRootId) || comment;
+}
+
+function getThreadComments(rootCommentId = "", comments = []) {
+  const normalizedRootId = String(rootCommentId || "").trim();
+
+  if (!normalizedRootId) {
+    return [];
+  }
+
+  return (Array.isArray(comments) ? comments : []).filter((comment) => {
+    const commentId = String(comment?.id || "").trim();
+    const threadRootId = String(comment?.threadRootId || comment?.parentCommentId || commentId).trim();
+    return commentId === normalizedRootId || threadRootId === normalizedRootId;
+  });
+}
+
+function getThreadLatestComment(rootCommentId = "", comments = []) {
+  return getThreadComments(rootCommentId, comments).reduce((latest, comment) => {
+    if (!latest) {
+      return comment;
+    }
+
+    return commentSeenTimestamp(comment) >= commentSeenTimestamp(latest) ? comment : latest;
+  }, null);
+}
+
+function sanitizeResolvedBy(value) {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const email = normalizeEmail(value.email);
+
+  if (!email) {
+    return null;
+  }
+
+  return {
+    email,
+    fullName: String(value.fullName || "").trim(),
+    firstName: String(value.firstName || "").trim(),
+    lastName: String(value.lastName || "").trim(),
+  };
+}
+
+function sanitizeStoredComment(value) {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const commentId = String(value.id || "").trim();
+
+  if (!commentId) {
+    return null;
+  }
+
+  return {
+    ...value,
+    id: commentId,
+    body: sanitizeCommentBody(value.body),
+    createdAt: String(value.createdAt || "").trim(),
+    editedAt: value.editedAt ? String(value.editedAt || "").trim() : "",
+    mentions: Array.isArray(value.mentions)
+      ? value.mentions
+          .map((mention) => ({
+            email: normalizeEmail(mention?.email),
+            fullName: String(mention?.fullName || "").trim(),
+          }))
+          .filter((mention) => mention.email && mention.fullName)
+      : [],
+    assets: sanitizeCommentAssets(value.assets),
+    selectionTarget: sanitizeCommentSelectionTarget(value.selectionTarget),
+    parentCommentId: String(value.parentCommentId || "").trim(),
+    threadRootId: String(value.threadRootId || value.parentCommentId || "").trim(),
+    resolvedAt: value.resolvedAt ? String(value.resolvedAt || "").trim() : "",
+    resolvedBy: sanitizeResolvedBy(value.resolvedBy),
+  };
+}
+
 function extractMentions(body, users) {
   return users
     .filter((candidate) => body.toLowerCase().includes(`@${candidate.fullName.toLowerCase()}`))
@@ -533,6 +704,15 @@ function extractMentions(body, users) {
       email: candidate.email,
       fullName: candidate.fullName,
     }));
+}
+
+function buildAuthorSnapshot(user) {
+  return {
+    email: user.email,
+    fullName: user.fullName,
+    firstName: user.firstName,
+    lastName: user.lastName,
+  };
 }
 
 async function buildCommentsPayload(project, page, user) {
@@ -938,7 +1118,7 @@ export async function handleCommentsRequest(req) {
       };
     }
 
-    const targetComment = comments[commentIndex];
+    const targetComment = sanitizeStoredComment(comments[commentIndex]);
 
     if (String(targetComment.author?.email || "").toLowerCase() !== user.email) {
       return {
@@ -954,10 +1134,9 @@ export async function handleCommentsRequest(req) {
     const nextComments = comments.map((comment, index) =>
       index === commentIndex
         ? {
-            ...comment,
+            ...sanitizeStoredComment(comment),
             body,
             mentions,
-            assets: sanitizeCommentAssets(comment.assets),
             editedAt: new Date().toISOString(),
           }
         : comment,
@@ -989,7 +1168,7 @@ export async function handleCommentsRequest(req) {
     }
 
     const comments = await readComments(project, page);
-    const targetComment = comments.find((comment) => comment.id === commentId);
+    const targetComment = sanitizeStoredComment(comments.find((comment) => comment.id === commentId));
 
     if (!targetComment) {
       return {
@@ -1014,12 +1193,76 @@ export async function handleCommentsRequest(req) {
       };
     }
 
-    const nextComments = comments.filter((comment) => comment.id !== commentId);
-    if (canUsePostgresCommentStore()) {
-      await deleteCommentRecord(project, page, commentId);
-    } else {
-      await writeComments(project, page, nextComments);
+    const threadRoot = getThreadRootComment(targetComment, comments);
+    const threadRootId = String(threadRoot?.id || "").trim();
+    const nextComments = comments.filter((comment) => {
+      const currentCommentId = String(comment?.id || "").trim();
+
+      if (currentCommentId === commentId) {
+        return false;
+      }
+
+      if (currentCommentId === threadRootId && commentId === threadRootId) {
+        return false;
+      }
+
+      if (commentId === threadRootId) {
+        return String(comment?.threadRootId || comment?.parentCommentId || "").trim() !== threadRootId;
+      }
+
+      return true;
+    });
+
+    await writeComments(project, page, nextComments);
+
+    return {
+      status: 200,
+      payload: await buildCommentsPayload(project, page, user),
+    };
+  }
+
+  if (action === "resolve" || action === "reopen") {
+    const commentId = String(payload.commentId || "").trim();
+
+    if (!commentId) {
+      return {
+        status: 400,
+        payload: {
+          ok: false,
+          error: "Comment ID is required.",
+        },
+      };
     }
+
+    const comments = await readComments(project, page);
+    const targetComment = sanitizeStoredComment(getCommentById(comments, commentId));
+    const threadRoot = sanitizeStoredComment(getThreadRootComment(targetComment, comments));
+
+    if (!targetComment || !threadRoot) {
+      return {
+        status: 404,
+        payload: {
+          ok: false,
+          error: "Comment not found.",
+        },
+      };
+    }
+
+    const nextComments = comments.map((comment) => {
+      const currentComment = sanitizeStoredComment(comment);
+
+      if (String(currentComment?.id || "").trim() !== threadRoot.id) {
+        return currentComment;
+      }
+
+      return {
+        ...currentComment,
+        resolvedAt: action === "resolve" ? new Date().toISOString() : "",
+        resolvedBy: action === "resolve" ? buildAuthorSnapshot(user) : null,
+      };
+    });
+
+    await writeComments(project, page, nextComments);
 
     return {
       status: 200,
@@ -1051,6 +1294,128 @@ export async function handleCommentsRequest(req) {
     };
   }
 
+  if (action === "markread" || action === "markunread") {
+    const commentId = String(payload.commentId || "").trim();
+
+    if (!commentId) {
+      return {
+        status: 400,
+        payload: {
+          ok: false,
+          error: "Comment ID is required.",
+        },
+      };
+    }
+
+    const comments = await readComments(project, page);
+    const targetComment = sanitizeStoredComment(getCommentById(comments, commentId));
+    const threadRoot = sanitizeStoredComment(getThreadRootComment(targetComment, comments));
+
+    if (!targetComment || !threadRoot) {
+      return {
+        status: 404,
+        payload: {
+          ok: false,
+          error: "Comment not found.",
+        },
+      };
+    }
+
+    if (action === "markread") {
+      const latestComment = getThreadLatestComment(threadRoot.id, comments) || threadRoot;
+      await writeCommentViewState(project, page, user.email, {
+        lastSeenCommentId: String(latestComment?.id || "").trim(),
+        lastSeenAt: commentSeenTimestamp(latestComment),
+        updatedAt: Date.now(),
+      });
+    } else {
+      const previousComments = comments.filter(
+        (comment) => commentSeenTimestamp(comment) < commentSeenTimestamp(threadRoot),
+      );
+      const previousComment = previousComments.at(-1) || null;
+      await writeCommentViewState(project, page, user.email, {
+        lastSeenCommentId: String(previousComment?.id || "").trim(),
+        lastSeenAt: previousComment ? commentSeenTimestamp(previousComment) : 0,
+        updatedAt: Date.now(),
+      });
+    }
+
+    return {
+      status: 200,
+      payload: await buildCommentsPayload(project, page, user),
+    };
+  }
+
+  if (action === "reply") {
+    const commentId = String(payload.commentId || "").trim();
+    const body = sanitizeCommentBody(payload.body);
+
+    if (!commentId) {
+      return {
+        status: 400,
+        payload: {
+          ok: false,
+          error: "Comment ID is required.",
+        },
+      };
+    }
+
+    if (!body) {
+      return {
+        status: 400,
+        payload: {
+          ok: false,
+          error: "Reply body is required.",
+        },
+      };
+    }
+
+    const comments = await readComments(project, page);
+    const parentComment = sanitizeStoredComment(getCommentById(comments, commentId));
+    const threadRoot = sanitizeStoredComment(getThreadRootComment(parentComment, comments));
+
+    if (!parentComment || !threadRoot) {
+      return {
+        status: 404,
+        payload: {
+          ok: false,
+          error: "Comment not found.",
+        },
+      };
+    }
+
+    const mentions = extractMentions(body, users);
+    const nextComment = {
+      id: crypto.randomUUID(),
+      body,
+      createdAt: new Date().toISOString(),
+      author: buildAuthorSnapshot(user),
+      mentions,
+      assets: [],
+      selectionTarget: sanitizeCommentSelectionTarget(parentComment.selectionTarget || threadRoot.selectionTarget),
+      parentCommentId: parentComment.id,
+      threadRootId: threadRoot.id,
+      resolvedAt: "",
+      resolvedBy: null,
+    };
+
+    const nextComments = [...comments, nextComment];
+    await writeComments(project, page, nextComments);
+    await writeCommentViewState(project, page, user.email, {
+      lastSeenCommentId: nextComment.id,
+      lastSeenAt: commentSeenTimestamp(nextComment),
+      updatedAt: Date.now(),
+    });
+
+    return {
+      status: 200,
+      payload: {
+        ...(await buildCommentsPayload(project, page, user)),
+        newCommentId: nextComment.id,
+      },
+    };
+  }
+
   const body = sanitizeCommentBody(payload.body);
 
   const assets = sanitizeCommentAssets(payload.assets);
@@ -1066,28 +1431,25 @@ export async function handleCommentsRequest(req) {
   }
 
   const mentions = extractMentions(body, users);
+  const selectionTarget = sanitizeCommentSelectionTarget(payload.selectionTarget);
 
   const nextComment = {
     id: crypto.randomUUID(),
     body,
     createdAt: new Date().toISOString(),
-    author: {
-      email: user.email,
-      fullName: user.fullName,
-      firstName: user.firstName,
-      lastName: user.lastName,
-    },
+    author: buildAuthorSnapshot(user),
     mentions,
     assets,
+    selectionTarget,
+    parentCommentId: "",
+    threadRootId: "",
+    resolvedAt: "",
+    resolvedBy: null,
   };
 
   const comments = await readComments(project, page);
   const nextComments = [...comments, nextComment];
-  if (canUsePostgresCommentStore()) {
-    await insertCommentRecord(project, page, nextComment);
-  } else {
-    await writeComments(project, page, nextComments);
-  }
+  await writeComments(project, page, nextComments);
   await writeCommentViewState(project, page, user.email, {
     lastSeenCommentId: nextComment.id,
     lastSeenAt: commentSeenTimestamp(nextComment),

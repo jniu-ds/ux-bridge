@@ -436,6 +436,7 @@ function syncDrawerState() {
   if (toggle) {
     toggle.setAttribute("aria-expanded", drawerOpen ? "true" : "false");
     toggle.setAttribute("aria-hidden", drawerOpen ? "true" : "false");
+    toggle.classList.toggle("is-active", drawerOpen);
   }
 
   syncMobileSheetBackdrop();
@@ -446,16 +447,8 @@ function syncMobileSheetBackdrop() {
     return;
   }
 
-  const isMobile = window.innerWidth <= 959;
-  const hasOpenDrawer =
-    document.body.classList.contains("customizer-open") ||
-    document.body.classList.contains("comments-open") ||
-    document.body.classList.contains("uploads-open") ||
-    document.body.classList.contains("vibe-open");
-
-  const shouldShow = isMobile && hasOpenDrawer;
-  mobileSheetBackdrop.hidden = !shouldShow;
-  mobileSheetBackdrop.classList.toggle("is-visible", shouldShow);
+  mobileSheetBackdrop.hidden = true;
+  mobileSheetBackdrop.classList.remove("is-visible");
 }
 
 function setDrawerOpen(nextOpen, source = "customizer") {

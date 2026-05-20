@@ -5,8 +5,10 @@ import { toCanvas } from "html-to-image";
   const isTableThumbnail = params.get("table-thumb") === "1";
   const shouldCapture = params.get("thumb-capture") === "1";
   const requestToken = String(params.get("thumb-request") || "").trim();
-  const THUMBNAIL_WIDTH = 264;
-  const THUMBNAIL_HEIGHT = 192;
+  const thumbFit = String(params.get("thumb-fit") || "crop").trim().toLowerCase();
+  const requestedViewport = String(params.get("preview-viewport") || "").trim().toLowerCase();
+  const THUMBNAIL_WIDTH = Math.max(1, Number(params.get("thumb-width")) || 264);
+  const THUMBNAIL_HEIGHT = Math.max(1, Number(params.get("thumb-height")) || 192);
 
   if (!isTableThumbnail || !shouldCapture) {
     return;
@@ -25,7 +27,89 @@ import { toCanvas } from "html-to-image";
   }
 
   function getCaptureTarget() {
-    return document.querySelector(".phone-frame-wrap");
+    return (
+      document.querySelector(".phone-frame") ||
+      document.querySelector(".phone-frame-wrap") ||
+      document.querySelector(".mobile-page")
+    );
+  }
+
+  function getExpectedViewportSize() {
+    const rootStyles = window.getComputedStyle(document.documentElement);
+    const width = Number.parseFloat(rootStyles.getPropertyValue("--preview-device-width")) || 375;
+    const height = Number.parseFloat(rootStyles.getPropertyValue("--preview-device-height")) || 812;
+    return {
+      width: Math.max(1, Math.round(width)),
+      height: Math.max(1, Math.round(height)),
+    };
+  }
+
+  function wait(ms) {
+    return new Promise((resolve) => window.setTimeout(resolve, ms));
+  }
+
+  async function waitForImagesToLoad(target) {
+    if (!(target instanceof HTMLElement)) {
+      return;
+    }
+
+    const pendingImages = [target, ...target.querySelectorAll("img")]
+      .filter((node) => node instanceof HTMLImageElement)
+      .filter((image) => !image.complete || image.naturalWidth <= 0);
+
+    if (!pendingImages.length) {
+      return;
+    }
+
+    await Promise.race([
+      Promise.all(
+        pendingImages.map(
+          (image) =>
+            new Promise((resolve) => {
+              image.addEventListener("load", resolve, { once: true });
+              image.addEventListener("error", resolve, { once: true });
+            }),
+        ),
+      ),
+      wait(2500),
+    ]);
+  }
+
+  function getFiniteAnimations(target) {
+    if (!(target instanceof HTMLElement) || typeof target.getAnimations !== "function") {
+      return [];
+    }
+
+    return target
+      .getAnimations({ subtree: true })
+      .filter((animation) => {
+        try {
+          const timing = animation.effect?.getComputedTiming?.();
+          const endTime = Number(timing?.endTime);
+          return Number.isFinite(endTime) && endTime > 0;
+        } catch {
+          return false;
+        }
+      });
+  }
+
+  async function waitForVisualStability(target) {
+    await waitForImagesToLoad(target);
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
+    const animations = getFiniteAnimations(target).filter(
+      (animation) => animation.playState === "running" || animation.playState === "pending",
+    );
+
+    if (animations.length) {
+      await Promise.race([
+        Promise.allSettled(animations.map((animation) => animation.finished.catch(() => undefined))),
+        wait(2500),
+      ]);
+    }
+
+    await wait(120);
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
   }
 
   function postResult(type, extra = {}) {
@@ -53,19 +137,27 @@ import { toCanvas } from "html-to-image";
     for (let attempt = 0; attempt < 60; attempt += 1) {
       const target = getCaptureTarget();
       const shell = document.querySelector("[data-bridge-shell]");
+      const previewShell = document.querySelector("[data-preview-ready]");
       const shellReady = !shell || !shell.hidden;
       const dynamicReady = document.body.dataset.dynamicProject !== "true" || Boolean(document.body.dataset.pageKey);
+      const previewReady = !(previewShell instanceof HTMLElement) || previewShell.dataset.previewReady === "true";
 
-      if (target && shellReady && dynamicReady) {
+      if (target && shellReady && dynamicReady && previewReady) {
         const rect = target.getBoundingClientRect();
+        const expected = getExpectedViewportSize();
+        const targetWidth = Math.round(rect.width);
+        const targetHeight = Math.round(rect.height);
+        const matchesViewport =
+          Math.abs(targetWidth - expected.width) <= 2 &&
+          Math.abs(targetHeight - expected.height) <= 2;
 
-        if (rect.width > 0 && rect.height > 0) {
-          await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        if (rect.width > 0 && rect.height > 0 && (requestedViewport ? matchesViewport : true)) {
+          await waitForVisualStability(target);
           return target;
         }
       }
 
-      await new Promise((resolve) => window.setTimeout(resolve, 100));
+      await wait(100);
     }
 
     throw new Error("Thumbnail capture target never became ready.");
@@ -91,10 +183,27 @@ import { toCanvas } from "html-to-image";
         throw new Error("Unable to prepare thumbnail canvas.");
       }
 
+      outputContext.fillStyle = "#ffffff";
+      outputContext.fillRect(0, 0, THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT);
+
       const sourceWidth = sourceCanvas.width;
       const sourceHeight = sourceCanvas.height;
       const sourceAspect = sourceWidth / sourceHeight;
       const targetAspect = THUMBNAIL_WIDTH / THUMBNAIL_HEIGHT;
+
+      if (thumbFit === "contain") {
+        const scale = Math.min(THUMBNAIL_WIDTH / sourceWidth, THUMBNAIL_HEIGHT / sourceHeight);
+        const renderWidth = Math.max(1, Math.round(sourceWidth * scale));
+        const renderHeight = Math.max(1, Math.round(sourceHeight * scale));
+        const renderX = Math.max(0, Math.round((THUMBNAIL_WIDTH - renderWidth) / 2));
+        const renderY = 0;
+
+        outputContext.drawImage(sourceCanvas, 0, 0, sourceWidth, sourceHeight, renderX, renderY, renderWidth, renderHeight);
+
+        const imageDataUrl = outputCanvas.toDataURL("image/jpeg", 0.72);
+        postResult("uxbridge:thumbnail-captured", { imageDataUrl });
+        return;
+      }
 
       let cropWidth = sourceWidth;
       let cropHeight = sourceHeight;

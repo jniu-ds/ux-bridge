@@ -28,12 +28,6 @@
     avatarUrl: "",
     avatarColor: "",
     connectingProviderId: "",
-    toolModalOpen: false,
-    toolModalProviderId: "",
-    toolModalApiKey: "",
-    toolModalBusy: false,
-    toolModalMessage: "",
-    toolModalTone: "neutral",
   };
 
   function escapeHtml(value) {
@@ -105,83 +99,8 @@
     render();
   }
 
-  function setToolModalState(next = {}) {
-    Object.assign(state, next);
-    render();
-  }
-
-  function openToolModal(providerId) {
-    setToolModalState({
-      toolModalOpen: true,
-      toolModalProviderId: providerId,
-      toolModalApiKey: "",
-      toolModalBusy: false,
-      toolModalMessage: "",
-      toolModalTone: "neutral",
-    });
-  }
-
-  function closeToolModal() {
-    setToolModalState({
-      toolModalOpen: false,
-      toolModalProviderId: "",
-      toolModalApiKey: "",
-      toolModalBusy: false,
-      toolModalMessage: "",
-      toolModalTone: "neutral",
-    });
-  }
-
   function renderToolModal() {
-    const provider = state.toolProviders.find((entry) => entry.id === state.toolModalProviderId);
-
-    if (!state.toolModalOpen || !provider) {
-      modalHost.innerHTML = "";
-      return;
-    }
-
-    const statusMarkup = state.toolModalMessage
-      ? `<p class="bridge-profile-tool-modal__status${state.toolModalTone === "error" ? " is-error" : ""}">${escapeHtml(state.toolModalMessage)}</p>`
-      : "";
-
-    modalHost.innerHTML = `
-      <div class="bridge-profile-tool-modal__shell" data-tool-modal-overlay>
-        <div class="bridge-profile-tool-modal" role="dialog" aria-modal="true" aria-label="Connect ${escapeHtml(provider.label)}">
-          <div class="bridge-profile-tool-modal__head">
-            <div>
-              <p class="bridge-profile__eyebrow-note">Provider connection</p>
-              <h2>Connect ${escapeHtml(provider.label)}</h2>
-              <p>Use your own OpenAI API key to create a user-owned Codex session for UX Bridge. The key is validated server-side and stored securely.</p>
-            </div>
-            <button class="bridge-profile-tool-modal__close" type="button" data-tool-modal-close aria-label="Close connect dialog">×</button>
-          </div>
-          ${statusMarkup}
-          <form class="bridge-profile-tool-modal__form" data-tool-modal-form>
-            <label class="bridge-profile__field">
-              <span class="bridge-profile__label">OpenAI API key</span>
-              <input
-                type="password"
-                name="apiKey"
-                autocomplete="off"
-                spellcheck="false"
-                placeholder="sk-..."
-                value="${escapeHtml(state.toolModalApiKey)}"
-                data-tool-modal-api-key
-                ${state.toolModalBusy ? "disabled" : ""}
-                required
-              />
-            </label>
-            <p class="bridge-profile-tool-modal__hint">This is used only for your Codex connection. UX Bridge does not expose the raw key back to the browser after it is stored.</p>
-            <div class="bridge-profile-tool-modal__actions">
-              <button type="button" class="bridge-profile__tool-button bridge-profile__tool-button--secondary" data-tool-modal-cancel ${state.toolModalBusy ? "disabled" : ""}>Cancel</button>
-              <button type="submit" class="bridge-profile__tool-button" ${state.toolModalBusy ? "disabled" : ""}>
-                ${state.toolModalBusy ? "Connecting…" : `Connect ${escapeHtml(provider.label)}`}
-              </button>
-            </div>
-          </form>
-        </div>
-      </div>
-    `;
+    modalHost.innerHTML = "";
   }
 
   function render() {
@@ -240,40 +159,39 @@
     const toolsMarkup = state.toolProviders
       .map((provider) => {
         const integration = integrations[provider.id] || {};
-        const connected = Boolean(integration.connected);
         const isBusy = state.connectingProviderId === provider.id;
-        const isLocalBridge = String(provider.availableVia || "").trim().toLowerCase() === "local-bridge";
-        const statusLabel = isLocalBridge ? "Local bridge" : connected ? "Connected" : "Not connected";
-        const accountLabel = isLocalBridge ? "Detected from the machine running UX Bridge" : integration.accountLabel || "No connector session";
+        const isConfigured = Boolean(provider.isConfigured);
+        const statusLabel = isConfigured ? "Configured" : "Needs setup";
+        const accountLabel = isConfigured ? "Managed by the UX Bridge organization workspace" : "Awaiting organization-managed API setup";
 
         return `
           <article class="bridge-profile__tool-card">
             <div class="bridge-profile__tool-copy">
               <div>
                 <strong>${escapeHtml(provider.label)}</strong>
-                <p>${escapeHtml(provider.helperCopy || "Ready for secure user-owned connector auth.")}</p>
+                <p>${escapeHtml(provider.helperCopy || "Ready for hosted vibe coding in UX Bridge.")}</p>
               </div>
-              <span class="bridge-profile__tool-badge${connected || isLocalBridge ? " is-connected" : ""}">
+              <span class="bridge-profile__tool-badge${isConfigured ? " is-connected" : ""}">
                 ${statusLabel}
               </span>
             </div>
             <div class="bridge-profile__tool-meta">
               <span>Credential mode</span>
-              <strong>${escapeHtml(integration.credentialMode || provider.credentialMode || "user-session")}</strong>
+              <strong>${escapeHtml(provider.credentialMode || integration.credentialMode || "organization-managed")}</strong>
             </div>
             <div class="bridge-profile__tool-meta">
-              <span>Account</span>
+              <span>Availability</span>
               <strong>${escapeHtml(accountLabel)}</strong>
             </div>
             <div class="bridge-profile__tool-actions">
               ${
                 !state.viewingSelf
                   ? `<span class="bridge-profile__tool-owner-note">Managed by account owner</span>`
-                  : isLocalBridge
-                    ? `<span class="bridge-profile__tool-owner-note">Managed by your local Codex bridge</span>`
-                  : connected
-                    ? `<button type="button" class="bridge-profile__tool-button bridge-profile__tool-button--secondary" data-tool-action="disconnect" data-provider-id="${provider.id}" ${isBusy ? "disabled" : ""}>${isBusy ? "Disconnecting…" : "Disconnect"}</button>`
-                    : `<button type="button" class="bridge-profile__tool-button" data-tool-action="connect" data-provider-id="${provider.id}" ${isBusy ? "disabled" : ""}>${isBusy ? "Connecting…" : `Connect ${escapeHtml(provider.label)}`}</button>`
+                  : `<span class="bridge-profile__tool-owner-note">${
+                      isConfigured
+                        ? "Ready for hosted vibe coding in the drawer"
+                        : "An admin still needs to configure this provider for the organization"
+                    }</span>`
               }
             </div>
           </article>
@@ -343,7 +261,7 @@
               <p class="bridge-profile__eyebrow-note">Connected tools</p>
               <h2>Provider connections</h2>
             </div>
-            <p class="bridge-profile__section-copy">Connector-ready scaffolding for user-owned Codex, Claude, and similar tool sessions. Provider secrets are stored securely and UX Bridge only keeps the connection metadata it needs.</p>
+            <p class="bridge-profile__section-copy">Vibe coding providers are now organization-managed. Users can choose between configured providers in the drawer, and UX Bridge keeps the API credentials on the server.</p>
           </div>
           <div class="bridge-profile__tool-grid">
             ${toolsMarkup}
@@ -428,11 +346,6 @@
     if (toolActionButton && state.user) {
       const providerId = String(toolActionButton.dataset.providerId || "").trim().toLowerCase();
       const action = String(toolActionButton.dataset.toolAction || "").trim();
-
-      if (providerId === "codex" && action !== "disconnect") {
-        openToolModal(providerId);
-        return;
-      }
 
       try {
         state.connectingProviderId = providerId;
@@ -571,87 +484,6 @@
     } finally {
       state.saving = false;
       render();
-    }
-  });
-
-  modalHost.addEventListener("click", (event) => {
-    if (
-      event.target.closest("[data-tool-modal-close]") ||
-      event.target.closest("[data-tool-modal-cancel]") ||
-      event.target === modalHost.querySelector("[data-tool-modal-overlay]")
-    ) {
-      closeToolModal();
-    }
-  });
-
-  modalHost.addEventListener("input", (event) => {
-    const apiKeyInput = event.target.closest("[data-tool-modal-api-key]");
-
-    if (!apiKeyInput) {
-      return;
-    }
-
-    state.toolModalApiKey = apiKeyInput.value;
-  });
-
-  modalHost.addEventListener("submit", async (event) => {
-    const form = event.target.closest("[data-tool-modal-form]");
-
-    if (!form || !state.user || state.toolModalProviderId !== "codex") {
-      return;
-    }
-
-    event.preventDefault();
-
-    try {
-      state.toolModalBusy = true;
-      state.toolModalMessage = "";
-      renderToolModal();
-
-      const response = await fetch(`${PROFILE_API}?email=${encodeURIComponent(state.user.email)}`, {
-        method: "POST",
-        credentials: "include",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          action: "connectTool",
-          providerId: "codex",
-          apiKey: state.toolModalApiKey,
-        }),
-      });
-      const payload = await response.json().catch(() => ({}));
-
-      if (!response.ok || !payload?.ok) {
-        throw new Error(payload?.error || "Unable to connect Codex.");
-      }
-
-      state.user = payload.user;
-      state.currentUser = payload.currentUser;
-      state.toolProviders = Array.isArray(payload.toolProviders) ? payload.toolProviders : state.toolProviders;
-      state.roles = Array.isArray(payload.roles) ? payload.roles : state.roles;
-      state.canEditRole = Boolean(payload.canEditRole);
-      state.canManageAllProfiles = Boolean(payload.canManageAllProfiles);
-      state.viewingSelf = Boolean(payload.viewingSelf);
-
-      if (state.viewingSelf && payload.currentUser) {
-        setKnownUser(payload.currentUser);
-        syncShellUser(payload.currentUser);
-      }
-
-      closeToolModal();
-      setStatus(payload.message || "Codex connected and verified.", "success");
-    } catch (error) {
-      state.toolModalBusy = false;
-      state.toolModalTone = "error";
-      state.toolModalMessage = error instanceof Error ? error.message : "Unable to connect Codex.";
-      renderToolModal();
-    }
-  });
-
-  window.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && state.toolModalOpen) {
-      closeToolModal();
     }
   });
 

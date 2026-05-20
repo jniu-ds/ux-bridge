@@ -14,45 +14,26 @@
   </head>
   <body class="bridge-body bridge-body--project" data-dynamic-project="true">
     <div class="bridge-layout bridge-layout--project" data-bridge-shell hidden>
-      <aside class="bridge-sidebar" data-bridge-sidebar>
-        <a class="bridge-sidebar__back" href="./projects.html" data-home-link="true" aria-label="Back to Projects">
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M15 5 8 12l7 7"></path>
-            <path d="M9 12h11"></path>
-          </svg>
-          <span>Back to Projects</span>
-        </a>
-
-        <nav class="bridge-sidebar__nav" aria-label="Project pages">
-          <p class="bridge-sidebar__project-label bridge-sidebar__nav-label">Pages</p>
-          <div class="bridge-sidebar__nav-pages" data-project-nav-pages></div>
-          <button class="bridge-sidebar__add-page" type="button" data-add-project-page>Add Page</button>
-        </nav>
-      </aside>
-
-      <button class="bridge-sidebar-backdrop" type="button" aria-label="Close navigation" data-nav-backdrop></button>
-
       <section class="bridge-main bridge-main--project">
         <header class="bridge-project-toolbar">
           <div class="bridge-project-toolbar__heading">
-            <button class="bridge-nav-toggle" type="button" aria-label="Open navigation" aria-expanded="false" data-nav-toggle>
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M4 7h16" />
-                <path d="M4 12h16" />
-                <path d="M4 17h16" />
-              </svg>
-            </button>
             <div>
               <p class="bridge-back-link">
-                <span data-project-name>Project</span>
+                <a href="./projects.html" data-project-back-link>
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M14.5 6.5 9 12l5.5 5.5"></path>
+                    <path d="M10 12h9"></path>
+                  </svg>
+                  <span>Back to Projects</span>
+                </a>
               </p>
               <div class="bridge-project-page-title" data-page-title-shell>
-                <h1 data-project-page-title>Page</h1>
+                <h1 data-project-page-title>Project</h1>
                 <button
                   class="bridge-inline-edit-trigger bridge-project-page-title__edit"
                   type="button"
-                  aria-label="Edit page name"
-                  data-edit-page-name
+                  aria-label="Edit project name"
+                  data-edit-project-name
                   hidden
                 >
                   <span class="bridge-inline-edit-trigger__tooltip" aria-hidden="true">Edit</span>
@@ -65,14 +46,14 @@
                   <textarea
                     class="bridge-project-page-title__input"
                     rows="1"
-                    aria-label="Page name"
-                    data-page-title-input
+                    aria-label="Project name"
+                    data-project-title-input
                   ></textarea>
                   <button
                     class="bridge-project-page-title__save"
                     type="button"
-                    aria-label="Save page name"
-                    data-save-page-name
+                    aria-label="Save project name"
+                    data-save-project-name
                   >
                     <svg viewBox="0 0 24 24" aria-hidden="true">
                       <path d="M5 12.5l4.2 4.2L19 7" />
@@ -82,39 +63,160 @@
               </div>
             </div>
           </div>
-          <div class="preview-scale-bar preview-scale-bar--header">
-            <div class="preview-scale-select" data-preview-scale>
-              <span class="sr-only">Preview scale</span>
-              <button
-                class="preview-scale-trigger"
-                type="button"
-                data-preview-scale-trigger
-                aria-label="Preview scale"
-                aria-haspopup="menu"
-                aria-expanded="false"
-              >
-                <span class="preview-scale-trigger__icon" aria-hidden="true"></span>
-                <span class="preview-scale-select__label" data-preview-scale-label>Fit</span>
-                <span class="preview-scale-trigger__chevron" aria-hidden="true"></span>
-              </button>
-              <div class="preview-scale-menu" data-preview-scale-menu role="menu" hidden>
-                <button type="button" class="preview-scale-menu__item" data-preview-scale-option="fit" role="menuitemradio" aria-checked="true">Fit</button>
-                <button type="button" class="preview-scale-menu__item" data-preview-scale-option="0.25" role="menuitemradio" aria-checked="false">25%</button>
-                <button type="button" class="preview-scale-menu__item" data-preview-scale-option="0.5" role="menuitemradio" aria-checked="false">50%</button>
-                <button type="button" class="preview-scale-menu__item" data-preview-scale-option="0.75" role="menuitemradio" aria-checked="false">75%</button>
-                <button type="button" class="preview-scale-menu__item" data-preview-scale-option="1" role="menuitemradio" aria-checked="false">Original (375x812)</button>
-                <button type="button" class="preview-scale-menu__item" data-preview-scale-option="2" role="menuitemradio" aria-checked="false">200%</button>
+          <div class="bridge-project-toolbar__actions" data-header-actions>
+            <div class="preview-scale-bar preview-scale-bar--header">
+              <div class="preview-scale-select" data-preview-scale>
+                <span class="sr-only">Preview scale</span>
+                <button
+                  class="preview-scale-trigger"
+                  type="button"
+                  data-preview-scale-trigger
+                  aria-label="Preview scale"
+                  data-tooltip="Screen Size"
+                  aria-haspopup="menu"
+                  aria-expanded="false"
+                >
+                  <span class="preview-scale-trigger__icon" aria-hidden="true"></span>
+                  <span class="preview-scale-trigger__copy">
+                    <span class="preview-scale-select__label" data-preview-scale-label>Fit</span>
+                    <span class="preview-scale-select__subtext" data-preview-scale-subtext hidden></span>
+                  </span>
+                </button>
+                <div class="preview-scale-menu" data-preview-scale-menu role="menu" hidden>
+                  <div class="preview-scale-menu__section">
+                    <div class="preview-scale-menu__viewport-row" data-preview-viewport-menu role="group" aria-label="Preview screen size">
+                      <button type="button" class="preview-scale-menu__viewport-option" data-preview-viewport-option="mobile" aria-pressed="true">
+                        <span class="preview-scale-menu__viewport-icon preview-scale-menu__viewport-icon--mobile" aria-hidden="true"></span>
+                        <span class="preview-scale-menu__viewport-copy">
+                          <span class="preview-scale-menu__viewport-label">Mobile</span>
+                          <span class="preview-scale-menu__viewport-note">375 × 812</span>
+                        </span>
+                      </button>
+                      <button type="button" class="preview-scale-menu__viewport-option" data-preview-viewport-option="tablet-portrait" aria-pressed="false">
+                        <span class="preview-scale-menu__viewport-icon preview-scale-menu__viewport-icon--tablet-portrait" aria-hidden="true"></span>
+                        <span class="preview-scale-menu__viewport-copy">
+                          <span class="preview-scale-menu__viewport-label">Tablet</span>
+                          <span class="preview-scale-menu__viewport-note">768 × 1024</span>
+                        </span>
+                      </button>
+                      <button type="button" class="preview-scale-menu__viewport-option" data-preview-viewport-option="tablet-landscape" aria-pressed="false">
+                        <span class="preview-scale-menu__viewport-icon preview-scale-menu__viewport-icon--tablet-landscape" aria-hidden="true"></span>
+                        <span class="preview-scale-menu__viewport-copy">
+                          <span class="preview-scale-menu__viewport-label">Wide</span>
+                          <span class="preview-scale-menu__viewport-note">1024 × 768</span>
+                        </span>
+                      </button>
+                      <button type="button" class="preview-scale-menu__viewport-option" data-preview-viewport-option="desktop" aria-pressed="false">
+                        <span class="preview-scale-menu__viewport-icon preview-scale-menu__viewport-icon--desktop" aria-hidden="true"></span>
+                        <span class="preview-scale-menu__viewport-copy">
+                          <span class="preview-scale-menu__viewport-label">Desktop</span>
+                          <span class="preview-scale-menu__viewport-note">1440 × 1024</span>
+                        </span>
+                      </button>
+                      <button type="button" class="preview-scale-menu__viewport-option" data-preview-viewport-option="responsive" aria-pressed="false">
+                        <span class="preview-scale-menu__viewport-icon preview-scale-menu__viewport-icon--responsive" aria-hidden="true"></span>
+                        <span class="preview-scale-menu__viewport-copy">
+                          <span class="preview-scale-menu__viewport-label">Responsive</span>
+                          <span class="preview-scale-menu__viewport-note">Fluid layout</span>
+                        </span>
+                      </button>
+                    </div>
+                  </div>
+                  <div class="preview-scale-menu__section preview-scale-menu__section--scales">
+                    <button type="button" class="preview-scale-menu__item preview-scale-menu__item--shortcut" data-preview-scale-option="fit" data-preview-scale-trigger-label="Fit" role="menuitemradio" aria-checked="true">
+                      <span class="preview-scale-menu__item-label">Fit</span>
+                      <span class="preview-scale-menu__item-meta">
+                        <span class="preview-scale-menu__item-shortcut">Cmd + 1</span>
+                      </span>
+                    </button>
+                    <button type="button" class="preview-scale-menu__item" data-preview-scale-option="0.25" role="menuitemradio" aria-checked="false" hidden>25%</button>
+                    <button type="button" class="preview-scale-menu__item" data-preview-scale-option="0.5" role="menuitemradio" aria-checked="false" hidden>50%</button>
+                    <button type="button" class="preview-scale-menu__item" data-preview-scale-option="0.75" role="menuitemradio" aria-checked="false" hidden>75%</button>
+                    <button type="button" class="preview-scale-menu__item preview-scale-menu__item--shortcut preview-scale-menu__item--stacked" data-preview-scale-option="1" data-preview-scale-trigger-label="Actual" data-preview-scale-trigger-subtext="(375x812)" role="menuitemradio" aria-checked="false">
+                      <span class="preview-scale-menu__item-copy">
+                        <span class="preview-scale-menu__item-label">Actual</span>
+                        <span class="preview-scale-menu__item-note">(375x812)</span>
+                      </span>
+                      <span class="preview-scale-menu__item-meta">
+                        <span class="preview-scale-menu__item-shortcut">Cmd + 0</span>
+                      </span>
+                    </button>
+                    <button type="button" class="preview-scale-menu__item" data-preview-scale-option="2" role="menuitemradio" aria-checked="false">200%</button>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
-          <div class="bridge-project-toolbar__actions" data-header-actions></div>
         </header>
-        <div class="bridge-project-side-actions" data-side-actions></div>
-
         <main class="app-shell">
-          <div class="phone-frame-wrap">
-            <section class="phone-frame">
-              <section class="mobile-page mobile-page--empty">
+          <nav class="project-page-strip" data-project-page-strip aria-label="Project pages">
+            <div class="project-page-strip__footer" data-project-nav-footer hidden></div>
+            <div class="project-page-strip__pages" data-project-nav-pages></div>
+          </nav>
+          <div class="bridge-preview-shell">
+            <div class="bridge-project-side-actions">
+              <div class="bridge-project-side-actions__primary" data-side-actions></div>
+            </div>
+            <div class="phone-frame-wrap" data-preview-ready="false">
+              <div class="preview-layer-tools" data-preview-layer-tools hidden>
+                <div class="preview-layer-tools__bar">
+                  <button
+                    type="button"
+                    class="preview-layer-tools__button preview-layer-tools__button--reset"
+                    data-preview-layer-reset
+                    aria-label="Reset breakpoint changes for selected layer"
+                    data-tooltip="Reset Overrides"
+                    hidden
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M4.75 8.75A7.25 7.25 0 1 1 6.6 16.1"></path>
+                      <path d="M4.75 4.75v4h4"></path>
+                    </svg>
+                  </button>
+                  <button
+                    type="button"
+                    class="preview-layer-tools__button"
+                    data-preview-layer-tool="ai"
+                    aria-label="Vibe for selected layer"
+                    data-tooltip="Vibe"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M12 4.5 13.95 8.55 18 10.5l-4.05 1.95L12 16.5l-1.95-4.05L6 10.5l4.05-1.95Z"></path>
+                      <path d="M18.5 3.5l.6 1.4 1.4.6-1.4.6-.6 1.4-.6-1.4-1.4-.6 1.4-.6Z"></path>
+                      <path d="M17.5 15.5l.8 1.9 1.9.8-1.9.8-.8 1.9-.8-1.9-1.9-.8 1.9-.8Z"></path>
+                    </svg>
+                  </button>
+                  <button
+                    type="button"
+                    class="preview-layer-tools__button"
+                    data-preview-layer-tool="comment"
+                    aria-label="Comment on selected layer"
+                    data-tooltip="Comment"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M5 6.5c0-1.38 1.12-2.5 2.5-2.5h9c1.38 0 2.5 1.12 2.5 2.5v7c0 1.38-1.12 2.5-2.5 2.5H10l-4.5 4v-4H7.5C6.12 16 5 14.88 5 13.5Z"></path>
+                      <path d="M8 8.75h8"></path>
+                      <path d="M8 12h5.5"></path>
+                    </svg>
+                  </button>
+                  <button
+                    type="button"
+                    class="preview-layer-tools__button"
+                    data-preview-layer-tool="link"
+                    aria-label="Link selected layer to another page"
+                    data-tooltip="Link"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M10.5 13.5 13.5 10.5"></path>
+                      <path d="M7.7 15.3 5.2 17.8a3 3 0 0 0 4.24 4.24l2.5-2.5"></path>
+                      <path d="M16.3 8.7l2.5-2.5a3 3 0 1 0-4.24-4.24l-2.5 2.5"></path>
+                    </svg>
+                  </button>
+                </div>
+                <div class="preview-layer-tools__popover" data-preview-layer-tools-popover hidden></div>
+              </div>
+              <section class="phone-frame">
+                <section class="mobile-page mobile-page--empty">
                 <header class="empty-mobile-taskbar" aria-hidden="true">
                   <span class="empty-mobile-taskbar__time">9:41</span>
                   <span class="empty-mobile-taskbar__sensor"></span>
@@ -125,19 +227,64 @@
                       <span></span>
                       <span></span>
                     </span>
-                    <span class="empty-mobile-taskbar__wifi" aria-hidden="true"></span>
+                    <span class="empty-mobile-taskbar__wifi" aria-hidden="true">
+                      <svg viewBox="0 0 16 12" aria-hidden="true">
+                        <path d="M1.5 4.2C5.27 0.93 10.73 0.93 14.5 4.2" />
+                        <path d="M3.95 6.65C6.28 4.64 9.72 4.64 12.05 6.65" />
+                        <path d="M6.2 8.9C7.27 7.98 8.73 7.98 9.8 8.9" />
+                        <circle cx="8" cy="10.3" r="1.05" />
+                      </svg>
+                    </span>
                     <span class="empty-mobile-taskbar__battery" aria-hidden="true">
                       <span class="empty-mobile-taskbar__battery-level"></span>
                     </span>
+                  </div>
+                </header>
+                <header class="desktop-preview-windowbar" aria-hidden="true">
+                  <div class="desktop-preview-windowbar__traffic">
+                    <span class="desktop-preview-windowbar__dot desktop-preview-windowbar__dot--close"></span>
+                    <span class="desktop-preview-windowbar__dot desktop-preview-windowbar__dot--minimize"></span>
+                    <span class="desktop-preview-windowbar__dot desktop-preview-windowbar__dot--zoom"></span>
+                  </div>
+                  <div class="desktop-preview-windowbar__address">
+                    <span class="desktop-preview-windowbar__lock" aria-hidden="true">
+                      <svg viewBox="0 0 16 16">
+                        <rect x="3.5" y="7" width="9" height="6" rx="1.75"></rect>
+                        <path d="M5.5 7V5.75A2.5 2.5 0 0 1 8 3.25a2.5 2.5 0 0 1 2.5 2.5V7"></path>
+                      </svg>
+                    </span>
+                    <span>uxbridge.io</span>
+                  </div>
+                  <div class="desktop-preview-windowbar__actions">
+                    <span class="desktop-preview-windowbar__action"></span>
+                    <span class="desktop-preview-windowbar__action"></span>
                   </div>
                 </header>
 
                 <section class="empty-mobile-shell" data-empty-mobile-shell>
                   <p class="empty-mobile-shell__eyebrow">Empty mobile shell</p>
                   <h2 data-empty-shell-page-title>Page</h2>
-                  <p>Start building this page with Codex when you’re ready.</p>
+                  <p>Choose a vibe-coding tool to start designing this page inside the mobile preview.</p>
                   <div class="empty-mobile-shell__actions">
-                    <button type="button" class="empty-mobile-shell__cta" data-vibe-launch>Edit with Codex</button>
+                    <p class="empty-mobile-shell__actions-title">Design with:</p>
+                    <div class="empty-mobile-shell__design-options">
+                      <button type="button" class="empty-mobile-shell__choice" data-vibe-launch-provider="codex" aria-label="Design with Codex">
+                        <span class="empty-mobile-shell__choice-icon empty-mobile-shell__choice-icon--codex" aria-hidden="true">
+                          <svg viewBox="0 0 24 24">
+                            <path d="M9.2 3.6 6.1 5.4a4.6 4.6 0 0 0-2.3 4v3.3a4.6 4.6 0 0 0 2.3 4l3.1 1.8m5-14.9 3.1 1.8a4.6 4.6 0 0 1 2.3 4v3.3a4.6 4.6 0 0 1-2.3 4l-3.1 1.8m-5 0 5-2.9m-5-8.2 5 2.9m-5 5.3V6.5" />
+                          </svg>
+                        </span>
+                        <span class="empty-mobile-shell__choice-label">Codex</span>
+                      </button>
+                      <button type="button" class="empty-mobile-shell__choice" data-vibe-launch-provider="claude" aria-label="Design with Claude">
+                        <span class="empty-mobile-shell__choice-icon empty-mobile-shell__choice-icon--claude" aria-hidden="true">
+                          <svg viewBox="0 0 24 24">
+                            <path d="M5.5 6.5h6.8v3.1H8.7v1.6h3.1v3H8.7v3.3H5.5Zm8.2 0h2.9c2.8 0 4.9 1.9 4.9 5.2s-2.1 5.3-4.9 5.3h-2.9Z" />
+                          </svg>
+                        </span>
+                        <span class="empty-mobile-shell__choice-label">Claude</span>
+                      </button>
+                    </div>
                     <button type="button" class="empty-mobile-shell__cta empty-mobile-shell__cta--secondary">
                       Import from Figma
                     </button>
@@ -150,11 +297,108 @@
                 </section>
               </section>
             </section>
+            </div>
+            <div class="bridge-preview-header">
+              <div class="bridge-preview-page-title" data-preview-page-title-shell>
+                <p class="bridge-preview-page-name" data-preview-page-name>Page</p>
+                <button
+                  class="bridge-inline-edit-trigger bridge-preview-page-title__edit"
+                  type="button"
+                  aria-label="Edit page name"
+                  data-edit-page-name
+                  hidden
+                >
+                  <span class="bridge-inline-edit-trigger__tooltip" aria-hidden="true">Edit</span>
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M3 17.25V21h3.75L18.81 8.94l-3.75-3.75L3 17.25Z" />
+                    <path d="M14.06 4.19l3.75 3.75" />
+                  </svg>
+                </button>
+                <div class="bridge-preview-page-title__editor" data-preview-page-title-editor hidden>
+                  <input
+                    class="bridge-preview-page-title__input"
+                    type="text"
+                    aria-label="Page name"
+                    data-preview-page-title-input
+                  />
+                  <button
+                    class="bridge-preview-page-title__save"
+                    type="button"
+                    aria-label="Save page name"
+                    data-save-page-name
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M5 12.5l4.2 4.2L19 7" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+              <div class="bridge-preview-header__actions">
+                <button
+                  type="button"
+                  class="preview-refresh-button preview-refresh-button--preview-header"
+                  data-preview-refresh
+                  aria-label="Reload mobile preview"
+                  data-tooltip="Reload"
+                  hidden
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M20 6v5h-5" />
+                    <path d="M4 18v-5h5" />
+                    <path d="M7.7 8.2A7 7 0 0 1 20 11" />
+                    <path d="M16.3 15.8A7 7 0 0 1 4 13" />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  class="preview-refresh-button preview-refresh-button--preview-header preview-refresh-button--danger"
+                  data-preview-delete-empty-page
+                  aria-label="Delete empty page"
+                  data-tooltip="Delete"
+                  hidden
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M4.5 7.5h15" />
+                    <path d="M9.5 3.75h5" />
+                    <path d="M7.5 7.5 8.2 19a1.5 1.5 0 0 0 1.5 1.4h4.6a1.5 1.5 0 0 0 1.5-1.4l.7-11.5" />
+                    <path d="M10 11v5.5" />
+                    <path d="M14 11v5.5" />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  class="preview-refresh-button preview-refresh-button--preview-header preview-refresh-button--menu"
+                  data-preview-page-menu-toggle
+                  aria-label="Page options"
+                  aria-haspopup="menu"
+                  aria-expanded="false"
+                  data-tooltip="Options"
+                  hidden
+                >
+                  <span aria-hidden="true">⋮</span>
+                </button>
+              </div>
+            </div>
           </div>
         </main>
+        <aside class="inspector-panel" data-preview-inspector hidden>
+          <div class="inspector-panel__inner">
+            <div class="preview-inspector__content" data-preview-inspector-content></div>
+          </div>
+        </aside>
         <aside class="vibe-panel" data-vibe-root></aside>
-        <aside class="customizer-panel" data-customizer-root></aside>
         <aside class="comments-panel" data-comments-root></aside>
+        <div class="preview-page-menu" data-preview-page-menu role="menu" aria-label="Page options" hidden>
+          <button type="button" class="preview-page-menu__item" data-preview-page-action="duplicate" role="menuitem">
+            <span class="preview-page-menu__label">Duplicate</span>
+          </button>
+          <button type="button" class="preview-page-menu__item" data-preview-page-action="clear" role="menuitem">
+            <span class="preview-page-menu__label">Clear</span>
+          </button>
+          <button type="button" class="preview-page-menu__item preview-page-menu__item--danger" data-preview-page-action="delete" role="menuitem">
+            <span class="preview-page-menu__label">Delete</span>
+          </button>
+        </div>
       </section>
     </div>
 
@@ -164,7 +408,6 @@
     <script src="./project-page-runtime.js"></script>
     <script src="./action-rail-icons.js"></script>
     <script src="./vibe-drawer.js"></script>
-    <script src="./customizer.js"></script>
     <script src="./comments-panel.js"></script>
     <script src="./viewer-presence.js"></script>
   </body>

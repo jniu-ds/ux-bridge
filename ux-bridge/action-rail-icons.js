@@ -1,6 +1,15 @@
 (function initActionRailIcons() {
   const outlineAttrs = 'fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"';
   const iconMarkup = Object.freeze({
+    inspect: `
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M8 3.75H5.75A2 2 0 0 0 3.75 5.75V8" ${outlineAttrs}></path>
+        <path d="M16 3.75h2.25a2 2 0 0 1 2 2V8" ${outlineAttrs}></path>
+        <path d="M20.25 16v2.25a2 2 0 0 1-2 2H16" ${outlineAttrs}></path>
+        <path d="M8 20.25H5.75a2 2 0 0 1-2-2V16" ${outlineAttrs}></path>
+        <rect x="8.25" y="8.25" width="7.5" height="7.5" rx="1.5" ${outlineAttrs}></rect>
+      </svg>
+    `,
     customize: `
       <svg viewBox="0 0 24 24" aria-hidden="true">
         <path d="M4 7h16" ${outlineAttrs}></path>
@@ -12,8 +21,12 @@
       </svg>
     `,
     vibe: `
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M12 3.6 14.72 9.11l6.08.88-4.4 4.29 1.04 6.06L12 17.48l-5.44 2.86 1.04-6.06-4.4-4.29 6.08-.88Z" ${outlineAttrs}></path>
+      <svg viewBox="0 0 24 24" aria-hidden="true" class="bridge-action-rail-icon--vibe">
+        <g transform="translate(-1.5 0)">
+          <path d="M12 4.5 13.95 8.55 18 10.5l-4.05 1.95L12 16.5l-1.95-4.05L6 10.5l4.05-1.95Z"></path>
+          <path d="M18.5 3.5l.6 1.4 1.4.6-1.4.6-.6 1.4-.6-1.4-1.4-.6 1.4-.6Z"></path>
+          <path d="M17.5 15.5l.8 1.9 1.9.8-1.9.8-.8 1.9-.8-1.9-1.9-.8 1.9-.8Z"></path>
+        </g>
       </svg>
     `,
     comments: `

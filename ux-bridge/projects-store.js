@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import * as parse5 from "parse5";
 import { ensureDurableStoreAvailable } from "./db/config.js";
 import {
   canUsePostgresProjectStore,
@@ -24,7 +25,6 @@ import {
   normalizeEmail,
   readJsonBody,
   readUser,
-  readUserIntegrationSecret,
   sendProjectInvitationEmail,
   sendJson,
   writeUser,
@@ -93,6 +93,81 @@ const PROJECT_EDIT_SESSION_STATUSES = [
 ];
 const PAGE_LOCK_MODE_SOFT = "soft";
 const DEFAULT_VIBE_PROVIDER_ID = "codex";
+const VIBE_PROVIDER_IDS = new Set(["codex", "claude"]);
+const MAX_CODEX_THREAD_MESSAGES = 120;
+const VIBE_PRICING_BY_PROVIDER = {
+  codex: {
+    modelLabel: "gpt-5.1-codex",
+    inputPerMillionUsd: 1.25,
+    outputPerMillionUsd: 10.0,
+  },
+};
+const DEFAULT_PROTOTYPE_LINK_TRANSITION = "dissolve";
+const DEFAULT_PROTOTYPE_LINK_MATCHING_LAYER_EASING = "standard";
+const DEFAULT_PROTOTYPE_LINK_MATCHING_LAYER_DURATION = 360;
+const PROTOTYPE_LINK_MATCHING_LAYER_DURATION_MIN = 100;
+const PROTOTYPE_LINK_MATCHING_LAYER_DURATION_MAX = 2000;
+const PROTOTYPE_LINK_TRANSITIONS = new Set([
+  "none",
+  "dissolve",
+  "slide-in-left",
+  "slide-in-right",
+  "slide-in-up",
+  "slide-in-down",
+  "slide-out-left",
+  "slide-out-right",
+  "slide-out-up",
+  "slide-out-down",
+  "push-left",
+  "push-right",
+  "push-up",
+  "push-down",
+  "scale",
+]);
+const PROTOTYPE_LINK_MATCHING_LAYER_EASINGS = new Set([
+  "standard",
+  "decelerate",
+  "accelerate",
+  "ease-in-out",
+  "linear",
+]);
+
+function normalizePrototypeLinkTransition(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "slide-left" || normalized === "slide-right" || normalized === "slide-up" || normalized === "slide-down") {
+    return `slide-in-${normalized.slice("slide-".length)}`;
+  }
+  return PROTOTYPE_LINK_TRANSITIONS.has(normalized) ? normalized : DEFAULT_PROTOTYPE_LINK_TRANSITION;
+}
+
+function normalizePrototypeLinkAnimateMatchingLayers(value) {
+  return value === true || String(value || "").trim().toLowerCase() === "true";
+}
+
+function normalizePrototypeLinkAnimateMatchingLayersEasing(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return PROTOTYPE_LINK_MATCHING_LAYER_EASINGS.has(normalized)
+    ? normalized
+    : DEFAULT_PROTOTYPE_LINK_MATCHING_LAYER_EASING;
+}
+
+function normalizePrototypeLinkAnimateMatchingLayersDuration(value) {
+  const numeric = Number.parseFloat(String(value ?? "").trim());
+  if (!Number.isFinite(numeric)) {
+    return DEFAULT_PROTOTYPE_LINK_MATCHING_LAYER_DURATION;
+  }
+  const clamped = Math.max(
+    PROTOTYPE_LINK_MATCHING_LAYER_DURATION_MIN,
+    Math.min(PROTOTYPE_LINK_MATCHING_LAYER_DURATION_MAX, numeric),
+  );
+  return Math.round(clamped);
+}
+
+function normalizeVibeProviderId(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return VIBE_PROVIDER_IDS.has(normalized) ? normalized : DEFAULT_VIBE_PROVIDER_ID;
+}
+
 const LEGACY_BRAND_AFFILIATE_PROJECT = {
   id: LEGACY_BRAND_AFFILIATE_PROJECT_ID,
   name: "Brand Affiliate Mobile",
@@ -235,6 +310,178 @@ function createProjectCodexContext(projectId = "") {
   return `codexctx_${base}_${crypto.randomUUID().slice(0, 8)}`;
 }
 
+function normalizeCodexThreadMessage(message) {
+  const createdAt = Number(message?.createdAt) || Date.now();
+  const role = String(message?.role || "system").trim().toLowerCase() || "system";
+  const kind = String(message?.kind || role).trim().toLowerCase() || role;
+
+  return {
+    id: String(message?.id || crypto.randomUUID()).trim(),
+    role,
+    kind,
+    userId: normalizeEmail(message?.userId),
+    pageId: normalizePageId(message?.pageId),
+    sessionId: String(message?.sessionId || "").trim(),
+    content: String(message?.content || "").trim(),
+    createdAt,
+    metadata: message?.metadata && typeof message.metadata === "object" ? message.metadata : {},
+  };
+}
+
+function createProjectCodexThread(project) {
+  const normalizedProjectId = normalizeProjectId(project?.id) || crypto.randomUUID().slice(0, 8);
+  const firstPageId = normalizePageId(project?.pages?.[0]?.id);
+
+  return {
+    id: `codexthread_${normalizedProjectId}`,
+    activePageId: firstPageId,
+    updatedAt: Number(project?.updatedAt || project?.createdAt) || Date.now(),
+    messages: [],
+  };
+}
+
+function normalizeProjectCodexThread(project) {
+  const input = project?.codexThread && typeof project.codexThread === "object" ? project.codexThread : {};
+  const fallback = createProjectCodexThread(project);
+  const messages = Array.isArray(input.messages) ? input.messages.map((entry) => normalizeCodexThreadMessage(entry)).filter((entry) => entry.content) : [];
+
+  return {
+    id: String(input.id || fallback.id).trim() || fallback.id,
+    activePageId: normalizePageId(input.activePageId) || fallback.activePageId,
+    updatedAt: Number(input.updatedAt) || fallback.updatedAt,
+    messages: messages
+      .sort((left, right) => Number(left.createdAt || 0) - Number(right.createdAt || 0))
+      .slice(-MAX_CODEX_THREAD_MESSAGES),
+  };
+}
+
+function appendProjectCodexThreadMessage(project, message) {
+  const nextThread = normalizeProjectCodexThread(project);
+  const nextMessage = normalizeCodexThreadMessage(message);
+
+  if (!nextMessage.content) {
+    project.codexThread = nextThread;
+    return nextThread;
+  }
+
+  nextThread.messages = [...nextThread.messages, nextMessage]
+    .sort((left, right) => Number(left.createdAt || 0) - Number(right.createdAt || 0))
+    .slice(-MAX_CODEX_THREAD_MESSAGES);
+  nextThread.updatedAt = Number(nextMessage.createdAt || Date.now()) || Date.now();
+
+  if (nextMessage.pageId) {
+    nextThread.activePageId = nextMessage.pageId;
+  }
+
+  project.codexThread = nextThread;
+  return nextThread;
+}
+
+function setProjectCodexActivePage(project, pageId) {
+  const nextThread = normalizeProjectCodexThread(project);
+  const normalizedPageId = normalizePageId(pageId);
+
+  if (!normalizedPageId) {
+    project.codexThread = nextThread;
+    return nextThread;
+  }
+
+  nextThread.activePageId = normalizedPageId;
+  nextThread.updatedAt = Date.now();
+  project.codexThread = nextThread;
+  return nextThread;
+}
+
+function createCodexThreadContent(message = "", pageName = "") {
+  const trimmedMessage = String(message || "").trim();
+  const trimmedPageName = String(pageName || "").trim();
+
+  if (trimmedPageName && trimmedMessage) {
+    return `${trimmedMessage} (${trimmedPageName})`;
+  }
+
+  return trimmedMessage || trimmedPageName;
+}
+
+function summarizeDesignTokenGroup(value) {
+  if (!value || typeof value !== "object") {
+    return 0;
+  }
+
+  return Object.keys(/** @type {Record<string, unknown>} */ (value)).length;
+}
+
+function buildProjectDesignSystemContext(project) {
+  const designTokens = project?.designTokens && typeof project.designTokens === "object" ? project.designTokens : {};
+  const tokenGroups = Object.entries(designTokens)
+    .map(([group, value]) => ({
+      group,
+      count: summarizeDesignTokenGroup(value),
+    }))
+    .filter((entry) => entry.count > 0);
+  const referencePages = (Array.isArray(project?.pages) ? project.pages : [])
+    .map((page) => {
+      const preview = normalizePagePreview(page?.preview || page?.vibe?.appliedDraft || page?.vibe?.lastDraft);
+
+      if (!preview) {
+        return null;
+      }
+
+      return {
+        id: page.id,
+        name: page.name,
+        summary: preview.summary,
+        providerLabel: preview.providerLabel,
+      };
+    })
+    .filter(Boolean)
+    .slice(0, 6);
+
+  return {
+    tokenGroups,
+    prototypeLinkCount: Array.isArray(project?.prototypeLinks) ? project.prototypeLinks.length : 0,
+    referencePages,
+    guidance: [
+      "Prefer existing UX Bridge patterns over inventing a brand-new visual language.",
+      tokenGroups.length
+        ? "Use the available design-token groups when deciding on color, spacing, and typography."
+        : "No formal token groups are registered yet, so keep the styling restrained and consistent with existing applied pages.",
+      referencePages.length
+        ? "Match the visual tone and component rhythm of the reference pages already in this project."
+        : "There are no applied reference pages yet, so keep the page structure mobile-first and lightweight.",
+    ],
+  };
+}
+
+function buildRecentCodexThreadContext(project, pageId = "") {
+  const normalizedPageId = normalizePageId(pageId);
+  const thread = normalizeProjectCodexThread(project);
+  const recentMessages = thread.messages.slice(-16);
+  const prioritized = [
+    ...recentMessages.filter((message) => normalizedPageId && message.pageId === normalizedPageId),
+    ...recentMessages.filter((message) => !normalizedPageId || message.pageId !== normalizedPageId),
+  ];
+
+  return prioritized.slice(-10).map((message) => ({
+    role: message.role,
+    kind: message.kind,
+    pageId: message.pageId,
+    sessionId: message.sessionId,
+    userId: message.userId,
+    content: message.content,
+    createdAt: message.createdAt,
+    assets: Array.isArray(message?.metadata?.assets)
+      ? message.metadata.assets.map((asset) => ({
+          id: String(asset?.id || "").trim(),
+          fileName: String(asset?.fileName || "").trim(),
+          kind: String(asset?.kind || "").trim(),
+          contentType: String(asset?.contentType || "").trim(),
+          sizeBytes: Number(asset?.sizeBytes || 0) || 0,
+        }))
+      : [],
+  }));
+}
+
 function normalizeProjectMembers(project) {
   const members = new Map();
   const explicitMembers = Array.isArray(project?.projectMembers) ? project.projectMembers : [];
@@ -366,6 +613,19 @@ function normalizePrototypeLinks(value) {
       label: String(entry?.label || "").trim() || "Prototype link",
       url: String(entry?.url || "").trim(),
       pageId: normalizePageId(entry?.pageId),
+      sourcePageId: normalizePageId(entry?.sourcePageId),
+      sourceLayerPath: String(entry?.sourceLayerPath || "").trim(),
+      sourceLayerLabel: String(entry?.sourceLayerLabel || "").trim(),
+      targetPageId: normalizePageId(entry?.targetPageId),
+      targetPageName: String(entry?.targetPageName || "").trim(),
+      transition: normalizePrototypeLinkTransition(entry?.transition),
+      animateMatchingLayers: normalizePrototypeLinkAnimateMatchingLayers(entry?.animateMatchingLayers),
+      animateMatchingLayersEasing: normalizePrototypeLinkAnimateMatchingLayersEasing(
+        entry?.animateMatchingLayersEasing,
+      ),
+      animateMatchingLayersDuration: normalizePrototypeLinkAnimateMatchingLayersDuration(
+        entry?.animateMatchingLayersDuration,
+      ),
       createdAt: Number(entry?.createdAt) || 0,
       createdBy: normalizeEmail(entry?.createdBy),
     }))
@@ -439,6 +699,7 @@ function normalizeProjectRecord(project) {
     sharingMode,
     visibility,
     codexContextId: String(project.codexContextId || createProjectCodexContext(project.id)).trim(),
+    codexThread: normalizeProjectCodexThread(project),
     codexAccessMode: normalizeCodexAccessMode(project.codexAccessMode),
     shareToken: String(project.shareToken || crypto.randomUUID()).trim(),
     memberEmails: legacyMemberLists.memberEmails,
@@ -457,6 +718,7 @@ function normalizeProjectRecord(project) {
 function createDefaultVibeState() {
   return {
     providerId: DEFAULT_VIBE_PROVIDER_ID,
+    viewportPreset: "mobile",
     prompt: "",
     includeProjectContext: true,
     includePageContext: true,
@@ -465,11 +727,80 @@ function createDefaultVibeState() {
     error: "",
     generatedAt: 0,
     appliedAt: 0,
-    credentialMode: "user-session",
-    availableVia: "provider-adapter",
+    credentialMode: "organization-managed",
+    availableVia: "server",
     lastDraft: null,
     appliedDraft: null,
     draftHistory: [],
+  };
+}
+
+function normalizeVibeViewportPreset(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+
+  if (
+    normalized === "mobile" ||
+    normalized === "tablet-portrait" ||
+    normalized === "tablet-landscape" ||
+    normalized === "desktop" ||
+    normalized === "responsive"
+  ) {
+    return normalized;
+  }
+
+  return "mobile";
+}
+
+function buildVibeViewportContext(viewportPreset = "mobile") {
+  const normalizedPreset = normalizeVibeViewportPreset(viewportPreset);
+
+  if (normalizedPreset === "tablet-portrait") {
+    return {
+      id: normalizedPreset,
+      label: "Tablet portrait",
+      width: 768,
+      height: 1024,
+      orientation: "portrait",
+    };
+  }
+
+  if (normalizedPreset === "tablet-landscape") {
+    return {
+      id: normalizedPreset,
+      label: "Tablet landscape",
+      width: 1024,
+      height: 768,
+      orientation: "landscape",
+    };
+  }
+
+  if (normalizedPreset === "desktop") {
+    return {
+      id: normalizedPreset,
+      label: "Desktop",
+      width: 1440,
+      height: 1024,
+      orientation: "landscape",
+    };
+  }
+
+  if (normalizedPreset === "responsive") {
+    return {
+      id: normalizedPreset,
+      label: "Responsive",
+      width: 1440,
+      height: 900,
+      orientation: "landscape",
+      responsive: true,
+    };
+  }
+
+  return {
+    id: "mobile",
+    label: "Mobile",
+    width: 375,
+    height: 812,
+    orientation: "portrait",
   };
 }
 
@@ -479,14 +810,20 @@ function normalizeVibeDraft(draft) {
   }
 
   return {
-    providerId: String(draft.providerId || DEFAULT_VIBE_PROVIDER_ID).trim().toLowerCase() || DEFAULT_VIBE_PROVIDER_ID,
+    providerId: normalizeVibeProviderId(draft.providerId || DEFAULT_VIBE_PROVIDER_ID),
     providerLabel: String(draft.providerLabel || "").trim(),
     summary: String(draft.summary || "").trim(),
+    assistantMessage: String(draft.assistantMessage || "").trim(),
     html: String(draft.html || "").trim(),
     css: String(draft.css || "").trim(),
+    stageStyle: String(draft.stageStyle || "").trim(),
+    breakpointOverrides:
+      draft.breakpointOverrides && typeof draft.breakpointOverrides === "object"
+        ? { ...draft.breakpointOverrides }
+        : {},
     generatedAt: Number(draft.generatedAt) || 0,
     assets: Array.isArray(draft.assets) ? draft.assets : [],
-    credentialMode: String(draft.credentialMode || "user-session").trim().toLowerCase() || "user-session",
+    credentialMode: String(draft.credentialMode || "organization-managed").trim().toLowerCase() || "organization-managed",
   };
 }
 
@@ -496,7 +833,8 @@ function normalizeVibeState(vibe) {
 
   return {
     ...base,
-    providerId: String(input.providerId || base.providerId).trim().toLowerCase() || base.providerId,
+    providerId: normalizeVibeProviderId(input.providerId || base.providerId),
+    viewportPreset: normalizeVibeViewportPreset(input.viewportPreset || base.viewportPreset),
     prompt: String(input.prompt || "").trim(),
     includeProjectContext: input.includeProjectContext !== false,
     includePageContext: input.includePageContext !== false,
@@ -512,6 +850,199 @@ function normalizeVibeState(vibe) {
     draftHistory: Array.isArray(input.draftHistory)
       ? input.draftHistory.map((entry) => normalizeVibeDraft(entry)).filter(Boolean)
       : [],
+  };
+}
+
+function normalizeSelectedLayerContext(input) {
+  const pathKey = String(input?.pathKey || "").trim();
+
+  if (!pathKey || pathKey === "__screen__") {
+    return null;
+  }
+
+  return {
+    pageId: String(input?.pageId || "").trim(),
+    pathKey,
+    label: String(input?.label || "").trim(),
+    tagName: String(input?.tagName || "").trim().toLowerCase(),
+    textSummary: String(input?.textSummary || "").trim(),
+    html: String(input?.html || "").trim(),
+  };
+}
+
+function parseLayerPathKey(value = "") {
+  return String(value || "")
+    .split(".")
+    .map((segment) => Number.parseInt(segment, 10))
+    .filter((segment) => Number.isInteger(segment) && segment >= 0);
+}
+
+function isParse5ElementNode(node) {
+  return Boolean(node && typeof node.nodeName === "string" && !String(node.nodeName).startsWith("#"));
+}
+
+function getParse5ElementChildren(node) {
+  return Array.isArray(node?.childNodes) ? node.childNodes.filter((child) => isParse5ElementNode(child)) : [];
+}
+
+function getMeaningfulFragmentChildNodes(fragment) {
+  return Array.isArray(fragment?.childNodes)
+    ? fragment.childNodes.filter((child) => {
+        if (isParse5ElementNode(child)) {
+          return true;
+        }
+
+        if (child?.nodeName === "#text") {
+          return String(child.value || "").trim().length > 0;
+        }
+
+        return false;
+      })
+    : [];
+}
+
+function resolveParse5NodeByLayerPath(fragment, pathKey = "") {
+  const path = parseLayerPathKey(pathKey);
+  let parent = fragment;
+  let current = null;
+
+  for (const segment of path) {
+    const children = getParse5ElementChildren(parent);
+    current = children[segment] || null;
+
+    if (!current) {
+      return null;
+    }
+
+    parent = current;
+  }
+
+  if (!current) {
+    return null;
+  }
+
+  return {
+    node: current,
+    parent: current.parentNode || null,
+  };
+}
+
+function replaceSelectedLayerHtmlByPath(currentHtml = "", pathKey = "", replacementHtml = "", layerLabel = "selected layer") {
+  const html = String(currentHtml || "").trim();
+  const replacement = String(replacementHtml || "").trim();
+
+  if (!html || !pathKey || !replacement) {
+    throw new Error(`Unable to update the ${layerLabel}.`);
+  }
+
+  const fragment = parse5.parseFragment(html);
+  const target = resolveParse5NodeByLayerPath(fragment, pathKey);
+
+  if (!target?.node || !target?.parent || !Array.isArray(target.parent.childNodes)) {
+    throw new Error(`The saved page source no longer matches the selected ${layerLabel}. Try refreshing and selecting the layer again.`);
+  }
+
+  const replacementFragment = parse5.parseFragment(replacement);
+  const replacementNodes = getMeaningfulFragmentChildNodes(replacementFragment);
+  const replacementElementNodes = replacementNodes.filter((node) => isParse5ElementNode(node));
+
+  if (replacementElementNodes.length !== 1) {
+    throw new Error(`The generated ${layerLabel} update must return exactly one root element.`);
+  }
+
+  const targetIndex = target.parent.childNodes.indexOf(target.node);
+
+  if (targetIndex < 0) {
+    throw new Error(`Unable to replace the selected ${layerLabel} in the current page source.`);
+  }
+
+  replacementNodes.forEach((node) => {
+    node.parentNode = target.parent;
+  });
+  target.parent.childNodes.splice(targetIndex, 1, ...replacementNodes);
+  return parse5.serialize(fragment).trim();
+}
+
+function mergeSelectedLayerCssPatch(currentCss = "", cssPatch = "", pathKey = "") {
+  const baseCss = String(currentCss || "").trim();
+  const patchCss = String(cssPatch || "").trim();
+  const normalizedPathKey = String(pathKey || "").trim();
+
+  if (!normalizedPathKey) {
+    return patchCss || baseCss;
+  }
+
+  const startMarker = `/* uxbridge-vibe-layer:${normalizedPathKey}:start */`;
+  const endMarker = `/* uxbridge-vibe-layer:${normalizedPathKey}:end */`;
+  const markerPattern = new RegExp(`${escapeRegExp(startMarker)}[\\s\\S]*?${escapeRegExp(endMarker)}\\s*`, "g");
+  const cleanedBase = baseCss.replace(markerPattern, "").trim();
+
+  if (!patchCss) {
+    return cleanedBase;
+  }
+
+  return [cleanedBase, `${startMarker}\n${patchCss}\n${endMarker}`].filter(Boolean).join("\n\n");
+}
+
+function countHtmlFragmentRoots(html = "") {
+  const fragment = parse5.parseFragment(String(html || "").trim());
+  return getMeaningfulFragmentChildNodes(fragment).filter((node) => isParse5ElementNode(node)).length;
+}
+
+function buildVibeVerificationSummary({
+  selectedLayer = null,
+  currentPreviewSource = null,
+  generatedHtml = "",
+  generatedCss = "",
+  appliedHtml = "",
+  appliedCss = "",
+  includeProjectContext = true,
+  includePageContext = true,
+  providerId = DEFAULT_VIBE_PROVIDER_ID,
+} = {}) {
+  const inputHtml = selectedLayer ? String(selectedLayer?.html || "").trim() : String(currentPreviewSource?.html || "").trim();
+  const inputCss = String(currentPreviewSource?.css || "").trim();
+  const returnedHtml = String(generatedHtml || "").trim();
+  const returnedCss = String(generatedCss || "").trim();
+  const nextAppliedHtml = String(appliedHtml || "").trim();
+  const nextAppliedCss = String(appliedCss || "").trim();
+  const normalizedProviderId = normalizeVibeProviderId(providerId);
+  const pricing = VIBE_PRICING_BY_PROVIDER[normalizedProviderId] || null;
+  const estimatedInputTokens = Math.max(0, Math.round((inputHtml.length + inputCss.length) / 4));
+  const estimatedOutputTokens = Math.max(0, Math.round((returnedHtml.length + returnedCss.length) / 4));
+  const estimatedInputCostUsd = pricing
+    ? (estimatedInputTokens / 1_000_000) * Number(pricing.inputPerMillionUsd || 0)
+    : null;
+  const estimatedOutputCostUsd = pricing
+    ? (estimatedOutputTokens / 1_000_000) * Number(pricing.outputPerMillionUsd || 0)
+    : null;
+  const estimatedTotalCostUsd =
+    estimatedInputCostUsd !== null && estimatedOutputCostUsd !== null
+      ? estimatedInputCostUsd + estimatedOutputCostUsd
+      : null;
+
+  return {
+    mode: selectedLayer ? "selected-layer" : "page",
+    providerId: normalizedProviderId,
+    providerModel: pricing?.modelLabel || "",
+    targetLabel: selectedLayer ? String(selectedLayer?.label || "Selected layer").trim() || "Selected layer" : "Full page",
+    targetPath: selectedLayer ? String(selectedLayer?.pathKey || "").trim() : "",
+    includeProjectContext: includeProjectContext !== false,
+    includePageContext: includePageContext !== false,
+    inputHtmlChars: inputHtml.length,
+    inputCssChars: inputCss.length,
+    returnedHtmlChars: returnedHtml.length,
+    returnedCssChars: returnedCss.length,
+    returnedRootElements: returnedHtml ? countHtmlFragmentRoots(returnedHtml) : 0,
+    appliedHtmlChars: nextAppliedHtml.length,
+    appliedCssChars: nextAppliedCss.length,
+    htmlDeltaChars: returnedHtml.length - inputHtml.length,
+    cssDeltaChars: returnedCss.length - inputCss.length,
+    estimatedInputTokens,
+    estimatedOutputTokens,
+    estimatedInputCostUsd,
+    estimatedOutputCostUsd,
+    estimatedTotalCostUsd,
   };
 }
 
@@ -1043,6 +1574,263 @@ async function persistProject(project, options = {}) {
   return nextProject;
 }
 
+function decodeHtmlAttributeEntities(value = "") {
+  return String(value || "")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&");
+}
+
+function encodeHtmlAttributeEntities(value = "") {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function doesBackgroundConfigReferenceAsset(config, asset) {
+  if (!config || typeof config !== "object" || !asset) {
+    return false;
+  }
+
+  const normalizedAssetId = String(asset.id || "").trim();
+  const normalizedBlobUrl = String(asset.blobUrl || "").trim();
+  const normalizedDownloadUrl = String(asset.downloadUrl || "").trim();
+  const normalizedConfigAssetId = String(config.assetId || "").trim();
+  const normalizedConfigUrl = String(config.url || "").trim();
+
+  return Boolean(
+    (normalizedAssetId && normalizedConfigAssetId === normalizedAssetId) ||
+      (normalizedBlobUrl && normalizedConfigUrl === normalizedBlobUrl) ||
+      (normalizedDownloadUrl && normalizedConfigUrl === normalizedDownloadUrl),
+  );
+}
+
+function scrubAssetFromBackgroundMemoryValue(value = "", asset) {
+  const decoded = decodeHtmlAttributeEntities(value);
+
+  try {
+    const parsed = JSON.parse(decoded);
+
+    if (!parsed || typeof parsed !== "object") {
+      return { value, changed: false };
+    }
+
+    const nextParsed = { ...parsed };
+    let changed = false;
+
+    for (const key of ["image", "video"]) {
+      if (doesBackgroundConfigReferenceAsset(nextParsed[key], asset)) {
+        delete nextParsed[key];
+        changed = true;
+      }
+    }
+
+    if (!changed) {
+      return { value, changed: false };
+    }
+
+    if (!Object.keys(nextParsed).length) {
+      return { value: "", changed: true };
+    }
+
+    return { value: encodeHtmlAttributeEntities(JSON.stringify(nextParsed)), changed: true };
+  } catch {
+    return { value, changed: false };
+  }
+}
+
+function scrubAssetFromBackgroundConfigValue(value = "", asset) {
+  const decoded = decodeHtmlAttributeEntities(value);
+
+  try {
+    const parsed = JSON.parse(decoded);
+    if (!doesBackgroundConfigReferenceAsset(parsed, asset)) {
+      return { value, changed: false };
+    }
+
+    return { value: "", changed: true };
+  } catch {
+    return { value, changed: false };
+  }
+}
+
+function escapeRegExp(value = "") {
+  return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function scrubAssetReferencesFromHtml(html = "", asset) {
+  const input = String(html || "");
+
+  if (!input) {
+    return { html: input, changed: false };
+  }
+
+  let nextHtml = input;
+  let changed = false;
+
+  nextHtml = nextHtml.replace(/\sdata-ux-background-config=(["'])([\s\S]*?)\1/gi, (match, quote, value) => {
+    const scrubbed = scrubAssetFromBackgroundConfigValue(value, asset);
+    if (!scrubbed.changed) {
+      return match;
+    }
+    changed = true;
+    return scrubbed.value ? ` data-ux-background-config=${quote}${scrubbed.value}${quote}` : "";
+  });
+
+  nextHtml = nextHtml.replace(/\sdata-ux-background-media-memory=(["'])([\s\S]*?)\1/gi, (match, quote, value) => {
+    const scrubbed = scrubAssetFromBackgroundMemoryValue(value, asset);
+    if (!scrubbed.changed) {
+      return match;
+    }
+    changed = true;
+    return scrubbed.value ? ` data-ux-background-media-memory=${quote}${scrubbed.value}${quote}` : "";
+  });
+
+  const assetUrls = [String(asset?.blobUrl || "").trim(), String(asset?.downloadUrl || "").trim()].filter(Boolean);
+
+  for (const assetUrl of assetUrls) {
+    const escapedUrl = escapeRegExp(assetUrl);
+    nextHtml = nextHtml.replace(
+      new RegExp(`<div[^>]*data-ux-background-video-wrap[^>]*>[\\s\\S]*?<video[^>]*src=(["'])${escapedUrl}\\1[^>]*>[\\s\\S]*?<\\/video>[\\s\\S]*?<\\/div>`, "gi"),
+      () => {
+        changed = true;
+        return "";
+      },
+    );
+
+    nextHtml = nextHtml.replace(/\sdata-ux-background-video(?:=(["']).*?\1)?/gi, (match) => {
+      changed = true;
+      return "";
+    });
+
+    nextHtml = nextHtml.replace(/\sstyle=(["'])([\s\S]*?)\1/gi, (match, quote, value) => {
+      if (!value.includes(assetUrl)) {
+        return match;
+      }
+
+      let nextStyle = String(value || "");
+      const styleBefore = nextStyle;
+      nextStyle = nextStyle.replace(new RegExp(`background-image\\s*:\\s*url\\((["'])?${escapedUrl}\\1?\\)\\s*;?`, "gi"), "");
+      nextStyle = nextStyle.replace(new RegExp(`background\\s*:\\s*url\\((["'])?${escapedUrl}\\1?\\)\\s*[^;"']*;?`, "gi"), "");
+      nextStyle = nextStyle.trim().replace(/;;+/g, ";").replace(/^\s*;\s*|\s*;\s*$/g, "");
+
+      if (nextStyle === styleBefore) {
+        return match;
+      }
+
+      changed = true;
+      return nextStyle ? ` style=${quote}${nextStyle}${quote}` : "";
+    });
+  }
+
+  return { html: nextHtml, changed };
+}
+
+function scrubAssetReferencesFromDraft(draft, asset, updatedAt) {
+  const normalizedDraft = normalizeVibeDraft(draft);
+
+  if (!normalizedDraft?.html) {
+    return { draft: normalizedDraft, changed: false };
+  }
+
+  const scrubbed = scrubAssetReferencesFromHtml(normalizedDraft.html, asset);
+
+  if (!scrubbed.changed) {
+    return { draft: normalizedDraft, changed: false };
+  }
+
+  return {
+    draft: normalizeVibeDraft({
+      ...normalizedDraft,
+      html: scrubbed.html,
+      generatedAt: Number(normalizedDraft.generatedAt) || updatedAt,
+    }),
+    changed: true,
+  };
+}
+
+export async function removeAssetReferencesFromProjectPages(projectId, asset) {
+  const normalizedProjectId = normalizeProjectId(projectId);
+  const normalizedAssetId = String(asset?.id || "").trim();
+
+  if (!normalizedProjectId || !normalizedAssetId) {
+    return false;
+  }
+
+  const project = await readDynamicProject(normalizedProjectId);
+
+  if (!project) {
+    return false;
+  }
+
+  let changed = false;
+  const updatedAt = Date.now();
+
+  for (const page of Array.isArray(project.pages) ? project.pages : []) {
+    let pageChanged = false;
+    const preview = normalizePagePreview(page.preview);
+    if (preview?.html) {
+      const scrubbedPreview = scrubAssetReferencesFromHtml(preview.html, asset);
+      if (scrubbedPreview.changed) {
+        page.preview = normalizePagePreview({
+          ...preview,
+          html: scrubbedPreview.html,
+          updatedAt,
+          appliedAt: Number(preview.appliedAt) || updatedAt,
+        });
+        page.previewUpdatedAt = updatedAt;
+        pageChanged = true;
+      }
+    }
+
+    const currentVibe = normalizeVibeState(page.vibe);
+    const nextVibe = { ...currentVibe };
+
+    const appliedDraftResult = scrubAssetReferencesFromDraft(currentVibe.appliedDraft, asset, updatedAt);
+    if (appliedDraftResult.changed) {
+      nextVibe.appliedDraft = appliedDraftResult.draft;
+      pageChanged = true;
+    }
+
+    const lastDraftResult = scrubAssetReferencesFromDraft(currentVibe.lastDraft, asset, updatedAt);
+    if (lastDraftResult.changed) {
+      nextVibe.lastDraft = lastDraftResult.draft;
+      pageChanged = true;
+    }
+
+    const nextDraftHistory = [];
+    let draftHistoryChanged = false;
+    for (const draft of Array.isArray(currentVibe.draftHistory) ? currentVibe.draftHistory : []) {
+      const result = scrubAssetReferencesFromDraft(draft, asset, updatedAt);
+      nextDraftHistory.push(result.draft);
+      draftHistoryChanged ||= result.changed;
+    }
+    if (draftHistoryChanged) {
+      nextVibe.draftHistory = nextDraftHistory.filter(Boolean);
+      pageChanged = true;
+    }
+
+    if (pageChanged) {
+      page.vibe = normalizeVibeState(nextVibe);
+      page.previewUpdatedAt = updatedAt;
+      changed = true;
+    }
+  }
+
+  if (!changed) {
+    return false;
+  }
+
+  project.updatedAt = updatedAt;
+  await persistProject(project, { syncWorkspace: true });
+  return true;
+}
+
 function buildShareUrl(project, launchUrl, origin = "") {
   const token = String(project?.shareToken || "").trim();
 
@@ -1074,6 +1862,11 @@ function serializeAvailableUsers(ownerDirectory = new Map()) {
 
 async function buildProjectPayload(project, ownerDirectory = new Map(), user = null, origin = "", options = {}) {
   const includePageContent = options.includePageContent !== false;
+  const viewerPreferenceSource =
+    options.userRecord ||
+    (user?.preferences ? user : (user?.email ? await readUser(user.email) : null));
+  const viewerViewportPreset = resolveProjectViewportPresetForUser(viewerPreferenceSource, project.id);
+  const viewerInspectorPinned = resolveInspectorPinnedPreferenceForUser(viewerPreferenceSource);
   const ownerEmail = String(project.ownerEmail || "").trim().toLowerCase();
   const ownerRecord = ownerDirectory.get(ownerEmail) || null;
   const ownerName = project.ownerNameOverride || ownerRecord?.fullName || ownerEmail || "Unknown";
@@ -1117,6 +1910,7 @@ async function buildProjectPayload(project, ownerDirectory = new Map(), user = n
       role: requester.role,
     }));
   const availableUsers = serializeAvailableUsers(ownerDirectory);
+  const codexThread = normalizeProjectCodexThread(project);
 
   return {
     id: project.id,
@@ -1155,9 +1949,15 @@ async function buildProjectPayload(project, ownerDirectory = new Map(), user = n
     pendingInviteEmails: normalizeEmailList(project.pendingInviteEmails),
     accessRequests,
     availableUsers,
+    codexThread,
     prototypeLinks: normalizePrototypeLinks(project.prototypeLinks),
     editSessions: normalizeEditSessions(project.editSessions),
     pageLocks: normalizePageLocks(project.pageLocks),
+    inspectorBreakpoints: normalizeProjectInspectorBreakpoints(project.inspectorBreakpoints),
+    viewerState: {
+      viewportPreset: viewerViewportPreset,
+      inspectorPinned: viewerInspectorPinned,
+    },
     pageCount: project.pages.length,
     pages: project.pages.map((page) => {
       const basePage = {
@@ -1166,6 +1966,7 @@ async function buildProjectPayload(project, ownerDirectory = new Map(), user = n
         hasContent: Boolean(page.hasContent),
         launchUrl: String(page.launchUrl || buildDynamicPageLaunchUrl(project.id, page.id)),
         createdAt: Number(page.createdAt) || 0,
+        previewUpdatedAt: Number(page?.previewUpdatedAt || page?.preview?.updatedAt || page?.preview?.appliedAt || 0),
         fileSlug: String(page.fileSlug || ""),
         files: page.files || buildPageFileMetadata(project.id, page),
         pageLock: page.pageLock || null,
@@ -1412,6 +2213,49 @@ function createPage(project, name = "", options = {}) {
   );
 }
 
+function duplicatePageName(project, sourcePageName = "") {
+  const baseName = `${String(sourcePageName || "").trim() || "Untitled Page"} Copy`;
+  const existingNames = new Set(
+    (Array.isArray(project?.pages) ? project.pages : [])
+      .map((page) => String(page?.name || "").trim().toLowerCase())
+      .filter(Boolean),
+  );
+
+  if (!existingNames.has(baseName.toLowerCase())) {
+    return baseName;
+  }
+
+  let suffix = 2;
+
+  while (existingNames.has(`${baseName} ${suffix}`.trim().toLowerCase())) {
+    suffix += 1;
+  }
+
+  return `${baseName} ${suffix}`;
+}
+
+function duplicateProjectPage(project, sourcePage, options = {}) {
+  const insertIndex = Math.max(0, Number(options.insertIndex) || 0);
+  const nextName = String(options.name || "").trim() || duplicatePageName(project, sourcePage?.name);
+  const nextPage = normalizeProjectPage(
+    {
+      ...structuredClone(sourcePage || {}),
+      id: normalizePageId(`${nextName}-${crypto.randomUUID().slice(0, 8)}`),
+      name: nextName,
+      fileSlug: "",
+      files: null,
+      launchUrl: "",
+      pageLock: null,
+      createdAt: Date.now(),
+      createdFrom: String(options.source || "duplicate").trim().toLowerCase() || "duplicate",
+    },
+    project.id,
+  );
+
+  project.pages.splice(insertIndex, 0, nextPage);
+  return nextPage;
+}
+
 function duplicateProjectName(name) {
   const baseName = String(name || "").trim() || "Untitled Project";
   return `${baseName} Copy`;
@@ -1437,6 +2281,38 @@ function createDefaultProjectName(existingProjects = []) {
   return `Project Awesome ${version}.0`;
 }
 
+const DEFAULT_PROJECT_INSPECTOR_BREAKPOINTS = Object.freeze([
+  { id: "mobile-xs", label: "Mobile & Extra Small", start: 320, end: 480 },
+  { id: "tablet-sm", label: "Tablet & Small", start: 481, end: 768 },
+  { id: "laptop-md", label: "Laptop & Medium", start: 769, end: 1024 },
+  { id: "desktop-lg", label: "Large Desktop", start: 1025, end: null },
+]);
+
+function normalizeProjectInspectorBreakpoints(value) {
+  const input = Array.isArray(value) ? value : [];
+
+  return DEFAULT_PROJECT_INSPECTOR_BREAKPOINTS.map((entry, index) => {
+    const candidate = input[index] && typeof input[index] === "object" ? input[index] : {};
+    const start = Number.parseInt(String(candidate.start ?? entry.start), 10);
+    const endCandidate = candidate.end;
+    const end =
+      endCandidate === null ||
+      endCandidate === undefined ||
+      String(endCandidate).trim() === "" ||
+      String(endCandidate).trim().toLowerCase() === "none"
+        ? null
+        : Number.parseInt(String(endCandidate), 10);
+    const normalizedEnd = Number.isFinite(end) ? Math.max(0, end) : null;
+
+    return {
+      id: entry.id,
+      label: entry.label,
+      start: Number.isFinite(start) ? Math.max(0, start) : entry.start,
+      end: normalizedEnd && normalizedEnd > 0 ? normalizedEnd : null,
+    };
+  });
+}
+
 function createProjectRecord(user, name, firstPageName = "") {
   const createdAt = Date.now();
   const project = {
@@ -1456,6 +2332,7 @@ function createProjectRecord(user, name, firstPageName = "") {
     editSessions: [],
     pageLocks: [],
     designTokens: {},
+    inspectorBreakpoints: normalizeProjectInspectorBreakpoints(),
     createdAt,
     updatedAt: createdAt,
     description: "Great things come to those who use awesome tools!",
@@ -1468,20 +2345,50 @@ function createProjectRecord(user, name, firstPageName = "") {
 }
 
 function createProjectContextPayload(project) {
+  const codexThread = normalizeProjectCodexThread(project);
+
   return {
     codexContextId: String(project.codexContextId || createProjectCodexContext(project.id)).trim(),
+    codexThreadId: codexThread.id,
+    activePageId: codexThread.activePageId,
   };
 }
 
 function createPrototypeLinkRecord(project, payload, user) {
+  const targetPageId = normalizePageId(payload.targetPageId || payload.pageId);
+  const targetPage =
+    (Array.isArray(project?.pages) ? project.pages : []).find((entry) => normalizePageId(entry?.id) === targetPageId) || null;
+
   return {
     id: crypto.randomUUID(),
-    label: String(payload.label || "").trim() || project.name || "Prototype link",
-    url: String(payload.url || "").trim(),
-    pageId: normalizePageId(payload.pageId),
+    label: String(payload.label || "").trim() || targetPage?.name || project.name || "Prototype link",
+    url:
+      String(payload.url || "").trim() ||
+      String(targetPage?.launchUrl || buildDynamicPageLaunchUrl(project.id, targetPageId)).trim(),
+    pageId: targetPageId,
+    sourcePageId: normalizePageId(payload.sourcePageId),
+    sourceLayerPath: String(payload.sourceLayerPath || "").trim(),
+    sourceLayerLabel: String(payload.sourceLayerLabel || "").trim(),
+    targetPageId,
+    targetPageName: String(targetPage?.name || "").trim(),
+    transition: normalizePrototypeLinkTransition(payload.transition),
+    animateMatchingLayers: normalizePrototypeLinkAnimateMatchingLayers(payload.animateMatchingLayers),
+    animateMatchingLayersEasing: normalizePrototypeLinkAnimateMatchingLayersEasing(
+      payload.animateMatchingLayersEasing,
+    ),
+    animateMatchingLayersDuration: normalizePrototypeLinkAnimateMatchingLayersDuration(
+      payload.animateMatchingLayersDuration,
+    ),
     createdAt: Date.now(),
     createdBy: normalizeEmail(user?.email),
   };
+}
+
+function matchesPrototypeLinkSource(entry, payload) {
+  return (
+    normalizePageId(entry?.sourcePageId) === normalizePageId(payload.sourcePageId) &&
+    String(entry?.sourceLayerPath || "").trim() === String(payload.sourceLayerPath || "").trim()
+  );
 }
 
 function updateProjectPrivacySettings(project, payload) {
@@ -1529,6 +2436,22 @@ function normalizeRecentProjectOpenMap(value = {}) {
   );
 }
 
+function normalizeProjectViewportPreferenceMap(value = {}) {
+  if (!value || typeof value !== "object") {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(value)
+      .map(([projectId, viewportPreset]) => [normalizeProjectId(projectId), normalizeVibeViewportPreset(viewportPreset)])
+      .filter(([projectId]) => projectId),
+  );
+}
+
+function normalizeInspectorPinnedPreference(value) {
+  return value === true;
+}
+
 async function readRecentProjectOpenMapForUser(userOrEmail = "") {
   if (userOrEmail && typeof userOrEmail === "object") {
     return normalizeRecentProjectOpenMap(userOrEmail.preferences?.projects?.recentOpenById);
@@ -1561,6 +2484,75 @@ async function writeRecentProjectOpenMapForUser(userOrEmail = "", recentOpenById
 
   await writeUser(user.email, nextUser);
   return normalizedMap;
+}
+
+function resolveInspectorPinnedPreferenceForUser(userOrRecord = null) {
+  return normalizeInspectorPinnedPreference(userOrRecord?.preferences?.projects?.inspectorPinned);
+}
+
+async function writeInspectorPinnedPreferenceForUser(userOrEmail = "", inspectorPinned = false) {
+  const user = userOrEmail && typeof userOrEmail === "object" ? userOrEmail : await readUser(userOrEmail);
+
+  if (!user?.email) {
+    return false;
+  }
+
+  const normalizedPinned = normalizeInspectorPinnedPreference(inspectorPinned);
+  const nextUser = {
+    ...user,
+    preferences: {
+      ...(user.preferences && typeof user.preferences === "object" ? user.preferences : {}),
+      projects: {
+        ...(user.preferences?.projects && typeof user.preferences.projects === "object" ? user.preferences.projects : {}),
+        inspectorPinned: normalizedPinned,
+      },
+    },
+    updatedAt: Date.now(),
+  };
+
+  await writeUser(user.email, nextUser);
+  return normalizedPinned;
+}
+
+function resolveProjectViewportPresetForUser(userOrRecord = null, projectId = "") {
+  const normalizedProjectId = normalizeProjectId(projectId);
+
+  if (!normalizedProjectId) {
+    return "mobile";
+  }
+
+  const preferenceMap = normalizeProjectViewportPreferenceMap(userOrRecord?.preferences?.projects?.viewportPresetByProjectId);
+  return normalizeVibeViewportPreset(preferenceMap[normalizedProjectId]);
+}
+
+async function writeProjectViewportPresetForUser(userOrEmail = "", projectId = "", viewportPreset = "mobile") {
+  const user = userOrEmail && typeof userOrEmail === "object" ? userOrEmail : await readUser(userOrEmail);
+  const normalizedProjectId = normalizeProjectId(projectId);
+
+  if (!user?.email || !normalizedProjectId) {
+    return {};
+  }
+
+  const normalizedPreset = normalizeVibeViewportPreset(viewportPreset);
+  const currentMap = normalizeProjectViewportPreferenceMap(user.preferences?.projects?.viewportPresetByProjectId);
+  const nextMap = {
+    ...currentMap,
+    [normalizedProjectId]: normalizedPreset,
+  };
+  const nextUser = {
+    ...user,
+    preferences: {
+      ...(user.preferences && typeof user.preferences === "object" ? user.preferences : {}),
+      projects: {
+        ...(user.preferences?.projects && typeof user.preferences.projects === "object" ? user.preferences.projects : {}),
+        viewportPresetByProjectId: nextMap,
+      },
+    },
+    updatedAt: Date.now(),
+  };
+
+  await writeUser(user.email, nextUser);
+  return nextMap;
 }
 
 async function createProjectPage(project, user, name = "", options = {}) {
@@ -1642,12 +2634,12 @@ export async function handleProjectsRequest(req) {
             project: {
               id: project.id,
               name: project.name,
-              updatedAt: project.updatedAt,
               pages: project.pages.map((page) => ({
                 id: page.id,
                 name: page.name,
                 launchUrl: page.launchUrl,
                 pageLock: page.pageLock || null,
+                previewUpdatedAt: Number(page?.previewUpdatedAt || page?.preview?.updatedAt || page?.preview?.appliedAt || 0),
               })),
             },
           },
@@ -1753,6 +2745,53 @@ export async function handleProjectsRequest(req) {
     };
   }
 
+  if (action === "updateInspectorBreakpoints") {
+    const projectId = normalizeProjectId(payload.project);
+
+    if (!projectId) {
+      return {
+        status: 400,
+        payload: {
+          ok: false,
+          error: "Choose a valid project.",
+        },
+      };
+    }
+
+    const project = await readDynamicProject(projectId);
+
+    if (!project) {
+      return {
+        status: 404,
+        payload: {
+          ok: false,
+          error: "Project not found.",
+        },
+      };
+    }
+
+    if (!(await userCanManageProjectPages(user, project))) {
+      return {
+        status: 403,
+        payload: {
+          ok: false,
+          error: "You do not have permission to update breakpoint settings for this project.",
+        },
+      };
+    }
+
+    project.inspectorBreakpoints = normalizeProjectInspectorBreakpoints(payload.inspectorBreakpoints);
+    const persistedProject = await persistProject(project, { syncWorkspace: false });
+
+    return {
+      status: 200,
+      payload: {
+        ok: true,
+        project: await buildProjectPayload(persistedProject, await buildOwnerDirectory(), user, origin),
+      },
+    };
+  }
+
   if (action === "createProject") {
     if (!(await canCreateProjects(user))) {
       return {
@@ -1832,8 +2871,6 @@ export async function handleProjectsRequest(req) {
       };
     }
 
-    const access = await computeProjectAccess(user, project);
-
     if (!(await userCanManageProjectPages(user, project))) {
       return {
         status: 403,
@@ -1853,6 +2890,81 @@ export async function handleProjectsRequest(req) {
         page: createPageResponse(persistedProject, page),
         project: await buildProjectPayload(persistedProject, await buildOwnerDirectory(), user, origin),
         vibeProviders: listVibeProviders(),
+      },
+    };
+  }
+
+  if (action === "duplicatePage") {
+    const projectId = normalizeProjectId(payload.project);
+    const pageId = normalizePageId(payload.page);
+    const beforePageId = normalizePageId(payload.beforePageId);
+    const requestedInsertIndex = Number.isFinite(Number(payload.insertIndex)) ? Math.trunc(Number(payload.insertIndex)) : null;
+
+    if (!projectId || !pageId) {
+      return {
+        status: 400,
+        payload: {
+          ok: false,
+          error: "Choose a valid project page.",
+        },
+      };
+    }
+
+    const project = await readDynamicProject(projectId);
+
+    if (!project) {
+      return {
+        status: 404,
+        payload: {
+          ok: false,
+          error: "Project not found.",
+        },
+      };
+    }
+
+    if (!(await userCanManageProjectPages(user, project))) {
+      return {
+        status: 403,
+        payload: {
+          ok: false,
+          error: "You do not have permission to duplicate pages in this project.",
+        },
+      };
+    }
+
+    const sourceIndex = project.pages.findIndex((entry) => entry.id === pageId);
+    const sourcePage = sourceIndex >= 0 ? project.pages[sourceIndex] : null;
+
+    if (!sourcePage) {
+      return {
+        status: 404,
+        payload: {
+          ok: false,
+          error: "Page not found.",
+        },
+      };
+    }
+
+    const beforeIndex = beforePageId ? project.pages.findIndex((entry) => entry.id === beforePageId) : -1;
+    const duplicatedPage = duplicateProjectPage(project, sourcePage, {
+      insertIndex:
+        beforeIndex >= 0
+          ? beforeIndex
+          : requestedInsertIndex === null
+          ? sourceIndex + 1
+          : Math.min(Math.max(requestedInsertIndex, 0), project.pages.length),
+      source: "duplicate",
+    });
+    project.updatedAt = Date.now();
+    const persistedProject = await persistProject(project, { syncWorkspace: true });
+    const persistedPage = persistedProject.pages.find((entry) => entry.id === duplicatedPage.id) || duplicatedPage;
+
+    return {
+      status: 200,
+      payload: {
+        ok: true,
+        page: createPageResponse(persistedProject, persistedPage),
+        project: await buildProjectPayload(persistedProject, await buildOwnerDirectory(), user, origin),
       },
     };
   }
@@ -2256,10 +3368,24 @@ export async function handleProjectsRequest(req) {
   if (action === "generateVibeContent") {
     const projectId = normalizeProjectId(payload.project);
     const pageId = normalizePageId(payload.page);
-    const providerId = String(payload.providerId || DEFAULT_VIBE_PROVIDER_ID).trim().toLowerCase() || DEFAULT_VIBE_PROVIDER_ID;
+    const providerId = normalizeVibeProviderId(payload.providerId || DEFAULT_VIBE_PROVIDER_ID);
+    const requestedViewportPreset = String(payload.viewportPreset || "").trim();
     const prompt = String(payload.prompt || "").trim();
     const includeProjectContext = payload.includeProjectContext !== false;
     const includePageContext = payload.includePageContext !== false;
+    const selectedLayer = normalizeSelectedLayerContext(payload.selectedLayer);
+    const attachmentPayloads = Array.isArray(payload.attachmentPayloads)
+      ? payload.attachmentPayloads
+          .map((asset) => ({
+            fileName: String(asset?.fileName || "").trim(),
+            kind: String(asset?.kind || "").trim(),
+            contentType: String(asset?.contentType || "").trim(),
+            sizeBytes: Number(asset?.sizeBytes || 0) || 0,
+            previewUrl: String(asset?.previewUrl || "").trim(),
+            dataBase64: String(asset?.dataBase64 || "").trim(),
+          }))
+          .filter((asset) => asset.fileName && asset.dataBase64)
+      : [];
 
     if (!projectId || !pageId) {
       return {
@@ -2303,30 +3429,38 @@ export async function handleProjectsRequest(req) {
     }
 
     const generatedAt = Date.now();
-    const providerAuth =
-      providerId === "codex"
-        ? {
-            apiKey: await readUserIntegrationSecret(user.email, "codex"),
-          }
-        : {};
+    setProjectCodexActivePage(project, page.id);
+    const currentVibe = normalizeVibeState(page.vibe);
+    const preferredViewportPreset = resolveProjectViewportPresetForUser(authenticatedUserRecord, project.id);
+    const activeViewportPreset = normalizeVibeViewportPreset(requestedViewportPreset || preferredViewportPreset);
+    const currentPreviewSource = normalizePagePreview(page?.preview || page?.vibe?.appliedDraft || page?.vibe?.lastDraft);
     let generated;
+    let verification = null;
 
     try {
       generated = await generateVibePageResult({
         providerId,
         prompt,
+        promptAssets: attachmentPayloads,
+        attachmentPayloads,
         projectId: project.id,
         projectName: project.name,
         pageId: page.id,
         pageName: page.name,
         includeProjectContext,
         includePageContext,
+        currentPageSummary: String(currentPreviewSource?.summary || "").trim(),
+        currentPageHtml: String(currentPreviewSource?.html || "").trim(),
+        currentPageCss: String(currentPreviewSource?.css || "").trim(),
+        selectedLayer,
+        recentThreadMessages: buildRecentCodexThreadContext(project, page.id),
+        designSystem: buildProjectDesignSystemContext(project),
+        viewport: buildVibeViewportContext(activeViewportPreset),
         currentUser: {
           email: user.email,
           fullName: user.fullName,
           role: user.role,
         },
-        providerAuth,
       });
     } catch (error) {
       return {
@@ -2338,9 +3472,76 @@ export async function handleProjectsRequest(req) {
       };
     }
 
+    if (selectedLayer) {
+      if (!String(currentPreviewSource?.html || "").trim()) {
+        return {
+          status: 400,
+          payload: {
+            ok: false,
+            error: "The selected layer can only be edited after the page has saved preview content.",
+          },
+        };
+      }
+
+      try {
+        const generatedFragmentHtml = String(generated.html || "");
+        const generatedFragmentCss = String(generated.css || "");
+        const appliedHtml = replaceSelectedLayerHtmlByPath(
+          String(currentPreviewSource?.html || ""),
+          selectedLayer.pathKey,
+          generatedFragmentHtml,
+          selectedLayer.label || "selected layer",
+        );
+        const appliedCss = mergeSelectedLayerCssPatch(
+          String(currentPreviewSource?.css || ""),
+          generatedFragmentCss,
+          selectedLayer.pathKey,
+        );
+
+        verification = buildVibeVerificationSummary({
+          selectedLayer,
+          currentPreviewSource,
+          generatedHtml: generatedFragmentHtml,
+          generatedCss: generatedFragmentCss,
+          appliedHtml,
+          appliedCss,
+          includeProjectContext,
+          includePageContext,
+          providerId,
+        });
+
+        generated = {
+          ...generated,
+          html: appliedHtml,
+          css: appliedCss,
+        };
+      } catch (error) {
+        return {
+          status: 400,
+          payload: {
+            ok: false,
+            error: error instanceof Error ? error.message : "Unable to apply the selected layer update.",
+          },
+        };
+      }
+    } else {
+      verification = buildVibeVerificationSummary({
+        selectedLayer: null,
+        currentPreviewSource,
+        generatedHtml: generated.html,
+        generatedCss: generated.css,
+        appliedHtml: generated.html,
+        appliedCss: generated.css,
+        includeProjectContext,
+        includePageContext,
+        providerId,
+      });
+    }
+
     const nextDraft = {
       providerId,
       providerLabel: generated.providerLabel,
+      assistantMessage: generated.assistantMessage,
       summary: generated.summary,
       html: generated.html,
       css: generated.css,
@@ -2348,12 +3549,12 @@ export async function handleProjectsRequest(req) {
       assets: generated.assets,
       credentialMode: generated.credentialMode,
     };
-    const currentVibe = normalizeVibeState(page.vibe);
 
     page.vibe = {
       ...currentVibe,
       providerId,
-      prompt,
+      viewportPreset: activeViewportPreset,
+      prompt: "",
       includeProjectContext,
       includePageContext,
       status: "ready",
@@ -2366,6 +3567,37 @@ export async function handleProjectsRequest(req) {
       appliedDraft: normalizeVibeDraft(currentVibe.appliedDraft),
       draftHistory: mergeVibeDraftHistory(currentVibe.draftHistory, currentVibe.lastDraft, nextDraft),
     };
+    appendProjectCodexThreadMessage(project, {
+      role: "user",
+      kind: "prompt",
+      userId: user.email,
+      pageId: page.id,
+      sessionId: String(payload.sessionId || "").trim(),
+      content: prompt,
+      metadata: {
+        providerId,
+        providerLabel: generated.providerLabel,
+        includeProjectContext,
+        includePageContext,
+        viewportPreset: activeViewportPreset,
+      },
+      createdAt: generatedAt,
+    });
+    appendProjectCodexThreadMessage(project, {
+      role: "assistant",
+      kind: "generation",
+      userId: user.email,
+      pageId: page.id,
+      sessionId: String(payload.sessionId || "").trim(),
+      content: createCodexThreadContent(generated.assistantMessage || generated.summary, page.name),
+      metadata: {
+        providerId,
+        providerLabel: generated.providerLabel,
+        viewportPreset: activeViewportPreset,
+        verification,
+      },
+      createdAt: generatedAt + 1,
+    });
     project.updatedAt = generatedAt;
     await writeDynamicProject(project);
 
@@ -2382,7 +3614,8 @@ export async function handleProjectsRequest(req) {
   if (action === "saveVibeDraft") {
     const projectId = normalizeProjectId(payload.project);
     const pageId = normalizePageId(payload.page);
-    const providerId = String(payload.providerId || DEFAULT_VIBE_PROVIDER_ID).trim().toLowerCase() || DEFAULT_VIBE_PROVIDER_ID;
+    const providerId = normalizeVibeProviderId(payload.providerId || DEFAULT_VIBE_PROVIDER_ID);
+    const requestedViewportPreset = String(payload.viewportPreset || "").trim();
     const prompt = String(payload.prompt || "").trim();
     const includeProjectContext = payload.includeProjectContext !== false;
     const includePageContext = payload.includePageContext !== false;
@@ -2445,9 +3678,11 @@ export async function handleProjectsRequest(req) {
     }
 
     const generatedAt = Number(payload.generated?.generatedAt) || Date.now();
+    setProjectCodexActivePage(project, page.id);
     const nextDraft = {
       providerId: generated.providerId,
       providerLabel: generated.providerLabel,
+      assistantMessage: generated.assistantMessage,
       summary: generated.summary,
       html: generated.html,
       css: generated.css,
@@ -2456,11 +3691,14 @@ export async function handleProjectsRequest(req) {
       credentialMode: generated.credentialMode,
     };
     const currentVibe = normalizeVibeState(page.vibe);
+    const preferredViewportPreset = resolveProjectViewportPresetForUser(authenticatedUserRecord, project.id);
+    const activeViewportPreset = normalizeVibeViewportPreset(requestedViewportPreset || preferredViewportPreset);
 
     page.vibe = {
       ...currentVibe,
       providerId: generated.providerId,
-      prompt,
+      viewportPreset: activeViewportPreset,
+      prompt: "",
       includeProjectContext,
       includePageContext,
       status: "ready",
@@ -2473,6 +3711,38 @@ export async function handleProjectsRequest(req) {
       appliedDraft: normalizeVibeDraft(currentVibe.appliedDraft),
       draftHistory: mergeVibeDraftHistory(currentVibe.draftHistory, currentVibe.lastDraft, nextDraft),
     };
+    if (prompt) {
+      appendProjectCodexThreadMessage(project, {
+        role: "user",
+        kind: "prompt",
+        userId: user.email,
+        pageId: page.id,
+        sessionId: String(payload.sessionId || "").trim(),
+        content: prompt,
+        metadata: {
+          providerId: generated.providerId,
+          providerLabel: generated.providerLabel,
+          includeProjectContext,
+          includePageContext,
+          viewportPreset: activeViewportPreset,
+        },
+        createdAt: generatedAt,
+      });
+    }
+    appendProjectCodexThreadMessage(project, {
+      role: "assistant",
+      kind: "generation",
+      userId: user.email,
+      pageId: page.id,
+      sessionId: String(payload.sessionId || "").trim(),
+      content: createCodexThreadContent(generated.assistantMessage || generated.summary, page.name),
+      metadata: {
+        providerId: generated.providerId,
+        providerLabel: generated.providerLabel,
+        viewportPreset: activeViewportPreset,
+      },
+      createdAt: generatedAt + 1,
+    });
     project.updatedAt = generatedAt;
     await writeDynamicProject(project);
 
@@ -2557,6 +3827,267 @@ export async function handleProjectsRequest(req) {
         ok: true,
         project: await buildProjectPayload(persistedProject, await buildOwnerDirectory(), user, origin),
         vibeProviders: listVibeProviders(),
+      },
+    };
+  }
+
+  if (action === "savePreviewContentEdits") {
+    const projectId = normalizeProjectId(payload.project);
+    const pageId = normalizePageId(payload.page);
+    const submittedHtml = String(payload.html || "").trim();
+    const submittedCss = String(payload.css || "").trim();
+    const submittedStageStyle = String(payload.stageStyle || "").trim();
+    const nextSummary = String(payload.summary || "").trim();
+    const shouldSyncBasePreview = payload.syncBase !== false;
+    const nextBreakpointOverrides =
+      payload.breakpointOverrides && typeof payload.breakpointOverrides === "object"
+        ? payload.breakpointOverrides
+        : {};
+
+    if (!projectId || !pageId || !submittedHtml) {
+      return {
+        status: 400,
+        payload: { ok: false, error: "Choose a valid project page and preview content." },
+      };
+    }
+
+    const project = await readDynamicProject(projectId);
+
+    if (!project) {
+      return {
+        status: 404,
+        payload: { ok: false, error: "Project not found." },
+      };
+    }
+
+    const access = await computeProjectAccess(user, project);
+
+    if (!access.hasAccess) {
+      return {
+        status: 403,
+        payload: { ok: false, error: "You do not have access to this project." },
+      };
+    }
+
+    const page = project.pages.find((entry) => entry.id === pageId);
+
+    if (!page) {
+      return {
+        status: 404,
+        payload: { ok: false, error: "Page not found." },
+      };
+    }
+
+    const currentVibe = normalizeVibeState(page.vibe);
+    const existingPreview = normalizePagePreview(page.preview || currentVibe.appliedDraft || currentVibe.lastDraft);
+    const nextHtml = shouldSyncBasePreview
+      ? submittedHtml
+      : String(existingPreview?.html || submittedHtml || "").trim();
+    const nextCss = shouldSyncBasePreview
+      ? submittedCss
+      : String(existingPreview?.css || submittedCss || "").trim();
+    const nextStageStyle = shouldSyncBasePreview
+      ? submittedStageStyle
+      : String(existingPreview?.stageStyle || submittedStageStyle || "").trim();
+    const updatedAt = Date.now();
+    const providerId = existingPreview?.providerId || currentVibe.providerId || DEFAULT_VIBE_PROVIDER_ID;
+    const providerLabel =
+      existingPreview?.providerLabel ||
+      currentVibe.appliedDraft?.providerLabel ||
+      currentVibe.lastDraft?.providerLabel ||
+      "";
+    const generatedAt =
+      Number(existingPreview?.generatedAt) ||
+      Number(currentVibe.appliedDraft?.generatedAt) ||
+      Number(currentVibe.lastDraft?.generatedAt) ||
+      updatedAt;
+    const summary = nextSummary || existingPreview?.summary || currentVibe.summary || "";
+    const assets = Array.isArray(currentVibe.appliedDraft?.assets)
+      ? currentVibe.appliedDraft.assets
+      : Array.isArray(currentVibe.lastDraft?.assets)
+        ? currentVibe.lastDraft.assets
+        : [];
+
+    const nextDraft = normalizeVibeDraft({
+      providerId,
+      providerLabel,
+      summary,
+      assistantMessage:
+        String(currentVibe.appliedDraft?.assistantMessage || "").trim() ||
+        String(currentVibe.lastDraft?.assistantMessage || "").trim(),
+      html: nextHtml,
+      css: nextCss,
+      stageStyle: nextStageStyle,
+      breakpointOverrides: nextBreakpointOverrides,
+      generatedAt,
+      assets,
+      credentialMode: currentVibe.credentialMode,
+    });
+
+    page.vibe = {
+      ...currentVibe,
+      status: "applied",
+      summary,
+      error: "",
+      appliedAt: updatedAt,
+      appliedDraft: nextDraft,
+      lastDraft: currentVibe.lastDraft && Number(currentVibe.lastDraft.generatedAt || 0) === generatedAt ? nextDraft : currentVibe.lastDraft,
+    };
+
+    page.preview = normalizePagePreview({
+      providerId,
+      providerLabel,
+      summary,
+      assistantMessage: nextDraft?.assistantMessage || "",
+      html: nextHtml,
+      css: nextCss,
+      stageStyle: nextStageStyle,
+      breakpointOverrides: nextBreakpointOverrides,
+      generatedAt,
+      appliedAt: updatedAt,
+      updatedAt,
+      source: "manual-edit",
+    });
+    page.hasContent = true;
+    project.updatedAt = updatedAt;
+    const persistedProject = await persistProject(project, { syncWorkspace: true });
+
+    return {
+      status: 200,
+      payload: {
+        ok: true,
+        project: await buildProjectPayload(persistedProject, await buildOwnerDirectory(), user, origin),
+        vibeProviders: listVibeProviders(),
+      },
+    };
+  }
+
+  if (action === "clearVibeContent") {
+    const projectId = normalizeProjectId(payload.project);
+    const pageId = normalizePageId(payload.page);
+
+    if (!projectId || !pageId) {
+      return {
+        status: 400,
+        payload: { ok: false, error: "Choose a valid project page." },
+      };
+    }
+
+    const project = await readDynamicProject(projectId);
+
+    if (!project) {
+      return {
+        status: 404,
+        payload: { ok: false, error: "Project not found." },
+      };
+    }
+
+    const access = await computeProjectAccess(user, project);
+
+    if (!access.hasAccess) {
+      return {
+        status: 403,
+        payload: { ok: false, error: "You do not have access to this project." },
+      };
+    }
+
+    const page = project.pages.find((entry) => entry.id === pageId);
+
+    if (!page) {
+      return {
+        status: 404,
+        payload: { ok: false, error: "Page not found." },
+      };
+    }
+
+    const currentVibe = normalizeVibeState(page.vibe);
+    const clearedAt = Date.now();
+
+    page.vibe = {
+      ...createDefaultVibeState(),
+      providerId: currentVibe.providerId || DEFAULT_VIBE_PROVIDER_ID,
+      includeProjectContext: currentVibe.includeProjectContext !== false,
+      includePageContext: currentVibe.includePageContext !== false,
+    };
+    syncAppliedPreviewIntoPage(page, null, clearedAt);
+    project.updatedAt = clearedAt;
+    const persistedProject = await persistProject(project, { syncWorkspace: true });
+
+    return {
+      status: 200,
+      payload: {
+        ok: true,
+        project: await buildProjectPayload(persistedProject, await buildOwnerDirectory(), user, origin),
+        vibeProviders: listVibeProviders(),
+      },
+    };
+  }
+
+  if (action === "restorePageSnapshot") {
+    const projectId = normalizeProjectId(payload.project);
+    const snapshotValue = payload.pageSnapshot && typeof payload.pageSnapshot === "object" ? payload.pageSnapshot : null;
+    const pageSnapshot = snapshotValue ? normalizeProjectPage(snapshotValue, projectId) : null;
+    const pageId = normalizePageId(pageSnapshot?.id || payload.page);
+    const requestedIndex = Number(payload.pageIndex);
+    const prototypeLinksSnapshot = Array.isArray(payload.prototypeLinksSnapshot)
+      ? normalizePrototypeLinks(payload.prototypeLinksSnapshot)
+      : null;
+    const pageLocksSnapshot = Array.isArray(payload.pageLocksSnapshot)
+      ? normalizePageLocks(payload.pageLocksSnapshot)
+      : null;
+
+    if (!projectId || !pageId || !pageSnapshot) {
+      return {
+        status: 400,
+        payload: { ok: false, error: "Choose a valid project page snapshot." },
+      };
+    }
+
+    const project = await readDynamicProject(projectId);
+
+    if (!project) {
+      return {
+        status: 404,
+        payload: { ok: false, error: "Project not found." },
+      };
+    }
+
+    if (!(await userCanManageProjectPages(user, project))) {
+      return {
+        status: 403,
+        payload: { ok: false, error: "You do not have permission to restore pages in this project." },
+      };
+    }
+
+    const existingIndex = project.pages.findIndex((entry) => entry.id === pageId);
+
+    if (existingIndex >= 0) {
+      project.pages.splice(existingIndex, 1, pageSnapshot);
+    } else {
+      const insertIndex = Number.isFinite(requestedIndex)
+        ? Math.min(Math.max(Math.trunc(requestedIndex), 0), project.pages.length)
+        : project.pages.length;
+      project.pages.splice(insertIndex, 0, pageSnapshot);
+    }
+
+    if (prototypeLinksSnapshot) {
+      project.prototypeLinks = prototypeLinksSnapshot;
+    }
+
+    if (pageLocksSnapshot) {
+      project.pageLocks = pageLocksSnapshot;
+    }
+
+    project.updatedAt = Date.now();
+    const persistedProject = await persistProject(project, { syncWorkspace: true });
+    const persistedPage = persistedProject.pages.find((entry) => entry.id === pageSnapshot.id) || pageSnapshot;
+
+    return {
+      status: 200,
+      payload: {
+        ok: true,
+        page: createPageResponse(persistedProject, persistedPage),
+        project: await buildProjectPayload(persistedProject, await buildOwnerDirectory(), user, origin),
       },
     };
   }
@@ -2711,6 +4242,68 @@ export async function handleProjectsRequest(req) {
     };
   }
 
+  if (action === "deletePage") {
+    const projectId = normalizeProjectId(payload.project);
+    const pageId = normalizePageId(payload.page);
+
+    if (!projectId || !pageId) {
+      return {
+        status: 400,
+        payload: { ok: false, error: "Choose a valid project page." },
+      };
+    }
+
+    const project = await readDynamicProject(projectId);
+
+    if (!project) {
+      return {
+        status: 404,
+        payload: { ok: false, error: "Project not found." },
+      };
+    }
+
+    if (!(await userCanManageProjectPages(user, project))) {
+      return {
+        status: 403,
+        payload: { ok: false, error: "You do not have permission to delete pages in this project." },
+      };
+    }
+
+    if (project.pages.length <= 1) {
+      return {
+        status: 400,
+        payload: { ok: false, error: "Projects must keep at least one page." },
+      };
+    }
+
+    const pageIndex = project.pages.findIndex((entry) => entry.id === pageId);
+
+    if (pageIndex < 0) {
+      return {
+        status: 404,
+        payload: { ok: false, error: "Page not found." },
+      };
+    }
+
+    project.pages.splice(pageIndex, 1);
+    project.pageLocks = normalizePageLocks(project.pageLocks).filter((lock) => lock.pageId !== pageId);
+    project.prototypeLinks = normalizePrototypeLinks(project.prototypeLinks).filter(
+      (entry) => entry.pageId !== pageId && entry.targetPageId !== pageId,
+    );
+    project.updatedAt = Date.now();
+    const persistedProject = await persistProject(project, { syncWorkspace: true });
+    const nextPage = persistedProject.pages[Math.max(0, pageIndex - 1)] || persistedProject.pages[0] || null;
+
+    return {
+      status: 200,
+      payload: {
+        ok: true,
+        nextPageId: nextPage?.id || "",
+        project: await buildProjectPayload(persistedProject, await buildOwnerDirectory(), user, origin),
+      },
+    };
+  }
+
   if (action === "reorderPages") {
     const projectId = normalizeProjectId(payload.project);
     const requestedOrder = Array.isArray(payload.order) ? payload.order.map((value) => String(value)) : [];
@@ -2759,19 +4352,6 @@ export async function handleProjectsRequest(req) {
     project.pages = finalOrder.map((pageId) => pageMap.get(pageId)).filter(Boolean);
     project.updatedAt = Date.now();
     const persistedProject = await persistProject(project, { syncWorkspace: true });
-    await recordAuditEvent({
-      actorEmail: user.email,
-      actorRole: user.role,
-      action: "project.create_edit_session",
-      resourceType: "project",
-      resourceId: persistedProject.id,
-      metadata: {
-        sessionId: session.id,
-        pageId,
-        branchName: session.branchName,
-        status: session.status,
-      },
-    });
 
     return {
       status: 200,
@@ -2852,6 +4432,231 @@ export async function handleProjectsRequest(req) {
       payload: {
         ok: true,
         codexContext: createProjectContextPayload(persistedProject),
+        project: await buildProjectPayload(persistedProject, await buildOwnerDirectory(), user, origin),
+      },
+    };
+  }
+
+  if (action === "setCodexActivePage") {
+    const projectId = normalizeProjectId(payload.project);
+    const pageId = normalizePageId(payload.page);
+
+    if (!projectId || !pageId) {
+      return {
+        status: 400,
+        payload: { ok: false, error: "Choose a valid project page." },
+      };
+    }
+
+    const project = await readDynamicProject(projectId);
+
+    if (!project) {
+      return {
+        status: 404,
+        payload: { ok: false, error: "Project not found." },
+      };
+    }
+
+    const access = await computeProjectAccess(user, project);
+
+    if (!access.hasAccess) {
+      return {
+        status: 403,
+        payload: { ok: false, error: "You do not have access to this project." },
+      };
+    }
+
+    if (!project.pages.some((page) => page.id === pageId)) {
+      return {
+        status: 404,
+        payload: { ok: false, error: "Page not found." },
+      };
+    }
+
+    const currentThread = normalizeProjectCodexThread(project);
+
+    if (currentThread.activePageId === pageId) {
+      return {
+        status: 200,
+        payload: {
+          ok: true,
+          project: await buildProjectPayload(project, await buildOwnerDirectory(), user, origin),
+        },
+      };
+    }
+
+    setProjectCodexActivePage(project, pageId);
+    project.updatedAt = Date.now();
+    const persistedProject = await persistProject(project, { syncWorkspace: false });
+
+    return {
+      status: 200,
+      payload: {
+        ok: true,
+        project: await buildProjectPayload(persistedProject, await buildOwnerDirectory(), user, origin),
+      },
+    };
+  }
+
+  if (action === "setVibeViewport") {
+    const projectId = normalizeProjectId(payload.project);
+    const viewportPreset = normalizeVibeViewportPreset(payload.viewportPreset);
+
+    if (!projectId) {
+      return {
+        status: 400,
+        payload: { ok: false, error: "Choose a valid project." },
+      };
+    }
+
+    const project = await readDynamicProject(projectId);
+
+    if (!project) {
+      return {
+        status: 404,
+        payload: { ok: false, error: "Project not found." },
+      };
+    }
+
+    const access = await computeProjectAccess(user, project);
+
+    if (!access.hasAccess) {
+      return {
+        status: 403,
+        payload: { ok: false, error: "You do not have access to this project." },
+      };
+    }
+
+    const currentViewportPreset = resolveProjectViewportPresetForUser(authenticatedUserRecord, project.id);
+    const ownerDirectory = await buildOwnerDirectory();
+
+    if (currentViewportPreset === viewportPreset) {
+      return {
+        status: 200,
+        payload: {
+          ok: true,
+          project: await buildProjectPayload(project, ownerDirectory, user, origin, {
+            userRecord: authenticatedUserRecord,
+          }),
+        },
+      };
+    }
+
+    await writeProjectViewportPresetForUser(authenticatedUserRecord, project.id, viewportPreset);
+    const updatedUserRecord = authenticatedUserRecord?.email ? await readUser(authenticatedUserRecord.email) : authenticatedUserRecord;
+
+    return {
+      status: 200,
+      payload: {
+        ok: true,
+        project: await buildProjectPayload(project, ownerDirectory, user, origin, {
+          userRecord: updatedUserRecord || authenticatedUserRecord,
+        }),
+      },
+    };
+  }
+
+  if (action === "setInspectorPinnedPreference") {
+    const projectId = normalizeProjectId(payload.project);
+    const inspectorPinned = normalizeInspectorPinnedPreference(payload.inspectorPinned);
+
+    if (!projectId) {
+      return {
+        status: 400,
+        payload: { ok: false, error: "Choose a valid project." },
+      };
+    }
+
+    const project = await readDynamicProject(projectId);
+
+    if (!project) {
+      return {
+        status: 404,
+        payload: { ok: false, error: "Project not found." },
+      };
+    }
+
+    const access = await computeProjectAccess(user, project);
+
+    if (!access.hasAccess) {
+      return {
+        status: 403,
+        payload: { ok: false, error: "You do not have access to this project." },
+      };
+    }
+
+    const currentInspectorPinned = resolveInspectorPinnedPreferenceForUser(authenticatedUserRecord);
+
+    if (currentInspectorPinned !== inspectorPinned) {
+      await writeInspectorPinnedPreferenceForUser(authenticatedUserRecord, inspectorPinned);
+    }
+
+    return {
+      status: 200,
+      payload: {
+        ok: true,
+        project: await buildProjectPayload(project, await buildOwnerDirectory(), user, origin),
+      },
+    };
+  }
+
+  if (action === "appendCodexThreadMessage") {
+    const projectId = normalizeProjectId(payload.project);
+    const pageId = normalizePageId(payload.page);
+    const sessionId = String(payload.sessionId || "").trim();
+    const role = String(payload.role || "user").trim().toLowerCase() || "user";
+    const kind = String(payload.kind || role).trim().toLowerCase() || role;
+    const content = String(payload.content || "").trim();
+
+    if (!projectId || !content) {
+      return {
+        status: 400,
+        payload: { ok: false, error: "Choose a valid project and message." },
+      };
+    }
+
+    const project = await readDynamicProject(projectId);
+
+    if (!project) {
+      return {
+        status: 404,
+        payload: { ok: false, error: "Project not found." },
+      };
+    }
+
+    const access = await computeProjectAccess(user, project);
+
+    if (!access.hasAccess) {
+      return {
+        status: 403,
+        payload: { ok: false, error: "You do not have access to this project." },
+      };
+    }
+
+    if (pageId && !project.pages.some((page) => page.id === pageId)) {
+      return {
+        status: 404,
+        payload: { ok: false, error: "Page not found." },
+      };
+    }
+
+    appendProjectCodexThreadMessage(project, {
+      role,
+      kind,
+      userId: user.email,
+      pageId,
+      sessionId,
+      content,
+      metadata: payload.metadata,
+      createdAt: Date.now(),
+    });
+    project.updatedAt = Date.now();
+    const persistedProject = await persistProject(project, { syncWorkspace: false });
+
+    return {
+      status: 200,
+      payload: {
+        ok: true,
         project: await buildProjectPayload(persistedProject, await buildOwnerDirectory(), user, origin),
       },
     };
@@ -2962,11 +4767,29 @@ export async function handleProjectsRequest(req) {
     project.editSessions = [...normalizeEditSessions(project.editSessions), session];
 
     if (pageId) {
+      setProjectCodexActivePage(project, pageId);
       project.pageLocks = normalizePageLocks(project.pageLocks).filter((lock) => lock.pageId !== pageId);
       project.pageLocks.push(createPageLockRecord(pageId, user, session.id));
     }
 
     project.updatedAt = Date.now();
+    const sessionPage = project.pages.find((page) => page.id === pageId) || null;
+    appendProjectCodexThreadMessage(project, {
+      role: "assistant",
+      kind: "session",
+      userId: user.email,
+      pageId,
+      sessionId: session.id,
+      content: createCodexThreadContent(
+        `Started an edit session on branch ${session.branchName || "codex branch"}.`,
+        sessionPage?.name || "",
+      ),
+      metadata: {
+        status: session.status,
+        branchName: session.branchName,
+      },
+      createdAt: project.updatedAt,
+    });
     const persistedProject = await persistProject(project, { syncWorkspace: true });
 
     return {
@@ -3047,6 +4870,20 @@ export async function handleProjectsRequest(req) {
     );
     project.pageLocks = normalizePageLocks(project.pageLocks).filter((lock) => lock.sessionId !== sessionId);
     project.updatedAt = mergedAt;
+    const sessionPage = project.pages.find((page) => page.id === session.pageId) || null;
+    appendProjectCodexThreadMessage(project, {
+      role: "assistant",
+      kind: "merge",
+      userId: user.email,
+      pageId: session.pageId,
+      sessionId,
+      content: createCodexThreadContent("Merged the edit session into the project.", sessionPage?.name || ""),
+      metadata: {
+        branchName: session.branchName,
+        status: EDIT_SESSION_STATUS_MERGED,
+      },
+      createdAt: mergedAt,
+    });
     const persistedProject = await persistProject(project, { syncWorkspace: true });
     await recordAuditEvent({
       actorEmail: user.email,
@@ -3198,6 +5035,27 @@ export async function handleProjectsRequest(req) {
     }
 
     project.updatedAt = Date.now();
+    const sessionPage = project.pages.find((page) => page.id === session.pageId) || null;
+    appendProjectCodexThreadMessage(project, {
+      role: "assistant",
+      kind: "session-status",
+      userId: user.email,
+      pageId: session.pageId,
+      sessionId,
+      content: createCodexThreadContent(
+        nextStatus === EDIT_SESSION_STATUS_READY_FOR_REVIEW
+          ? "Marked the current edit session ready for review."
+          : nextStatus === EDIT_SESSION_STATUS_ACTIVE
+            ? "Resumed editing for the current page session."
+            : "Archived the current edit session.",
+        sessionPage?.name || "",
+      ),
+      metadata: {
+        status: nextStatus,
+        branchName: session.branchName,
+      },
+      createdAt: project.updatedAt,
+    });
     const persistedProject = await persistProject(project, { syncWorkspace: true });
     await recordAuditEvent({
       actorEmail: user.email,
@@ -3263,7 +5121,10 @@ export async function handleProjectsRequest(req) {
       };
     }
 
-    project.prototypeLinks = [...normalizePrototypeLinks(project.prototypeLinks), prototypeLink];
+    project.prototypeLinks = [
+      ...normalizePrototypeLinks(project.prototypeLinks).filter((entry) => !matchesPrototypeLinkSource(entry, payload)),
+      prototypeLink,
+    ];
     project.updatedAt = Date.now();
     const persistedProject = await persistProject(project, { syncWorkspace: true });
     await recordAuditEvent({
@@ -3284,6 +5145,68 @@ export async function handleProjectsRequest(req) {
       payload: {
         ok: true,
         prototypeLink,
+        project: await buildProjectPayload(persistedProject, await buildOwnerDirectory(), user, origin),
+      },
+    };
+  }
+
+  if (action === "removePrototypeLink") {
+    const projectId = normalizeProjectId(payload.project);
+
+    if (!projectId) {
+      return {
+        status: 400,
+        payload: { ok: false, error: "Choose a valid project." },
+      };
+    }
+
+    const project = await readDynamicProject(projectId);
+
+    if (!project) {
+      return {
+        status: 404,
+        payload: { ok: false, error: "Project not found." },
+      };
+    }
+
+    const access = await computeProjectAccess(user, project);
+
+    if (!access.hasAccess) {
+      return {
+        status: 403,
+        payload: { ok: false, error: "You do not have access to this project." },
+      };
+    }
+
+    const existingLinks = normalizePrototypeLinks(project.prototypeLinks);
+    const nextLinks = existingLinks.filter((entry) => !matchesPrototypeLinkSource(entry, payload));
+
+    if (nextLinks.length === existingLinks.length) {
+      return {
+        status: 404,
+        payload: { ok: false, error: "Prototype link not found." },
+      };
+    }
+
+    project.prototypeLinks = nextLinks;
+    project.updatedAt = Date.now();
+    const persistedProject = await persistProject(project, { syncWorkspace: true });
+    await recordAuditEvent({
+      actorEmail: user.email,
+      actorRole: user.role,
+      action: "project.remove_prototype_link",
+      resourceType: "project",
+      resourceId: persistedProject.id,
+      metadata: {
+        sourcePageId: normalizePageId(payload.sourcePageId),
+        sourceLayerPath: String(payload.sourceLayerPath || "").trim(),
+      },
+    });
+
+    return {
+      status: 200,
+      payload: {
+        ok: true,
         project: await buildProjectPayload(persistedProject, await buildOwnerDirectory(), user, origin),
       },
     };

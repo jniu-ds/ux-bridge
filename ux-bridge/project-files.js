@@ -217,8 +217,14 @@ export function normalizePagePreview(preview) {
     providerId: String(candidate.providerId || "").trim().toLowerCase(),
     providerLabel: String(candidate.providerLabel || "").trim(),
     summary,
+    assistantMessage: String(candidate.assistantMessage || "").trim(),
     html,
     css,
+    stageStyle: String(candidate.stageStyle || "").trim(),
+    breakpointOverrides:
+      candidate.breakpointOverrides && typeof candidate.breakpointOverrides === "object"
+        ? /** @type {Record<string, unknown>} */ (candidate.breakpointOverrides)
+        : {},
     generatedAt: Number(candidate.generatedAt) || 0,
     appliedAt: Number(candidate.appliedAt) || 0,
     updatedAt: Number(candidate.updatedAt) || Number(candidate.appliedAt) || Number(candidate.generatedAt) || 0,

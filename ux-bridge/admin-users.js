@@ -111,6 +111,19 @@
       .join("");
   }
 
+  function formatAiCost(value) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric) || numeric <= 0) {
+      return "$0.00";
+    }
+
+    if (numeric < 0.01) {
+      return `$${numeric.toFixed(4)}`;
+    }
+
+    return `$${numeric.toFixed(2)}`;
+  }
+
   function getSelectedUserEmails() {
     const knownEmails = new Set(state.users.map((user) => user.email));
     return state.selectedUserEmails.filter((email) => knownEmails.has(email));
@@ -513,6 +526,15 @@
                 </div>
               </div>
             </td>
+            <td class="bridge-admin-table__ai-cell">
+              <span
+                class="bridge-admin-table__ai-cost"
+                data-tooltip="Estimated total AI cost: ${escapeHtml(formatAiCost(user.aiUsage?.totalEstimatedCostUsd || 0))}"
+                tabindex="0"
+              >
+                ${escapeHtml(formatAiCost(user.aiUsage?.currentMonthEstimatedCostUsd || 0))}
+              </span>
+            </td>
             <td class="bridge-admin-table__actions-cell">
               <div class="bridge-projects-table__actions bridge-admin-table__actions" data-admin-actions>
                 <button
@@ -700,6 +722,7 @@
                     ${getSortArrowMarkup("role")}
                   </button>
                 </th>
+                <th>AI / Month</th>
                 <th>Actions</th>
               </tr>
             </thead>

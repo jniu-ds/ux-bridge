@@ -195,17 +195,25 @@
     const pendingInvites = Array.isArray(project?.pendingInviteEmails) ? project.pendingInviteEmails : [];
     const prototypeLinks = Array.isArray(project?.prototypeLinks) ? project.prototypeLinks : [];
     const prototypePages = Array.isArray(project?.pages) ? project.pages : [];
+    let shareRoot = root.querySelector("[data-project-share-root]");
 
-    root.innerHTML = `
+    if (!(shareRoot instanceof HTMLElement)) {
+      shareRoot = document.createElement("div");
+      shareRoot.setAttribute("data-project-share-root", "");
+      root.append(shareRoot);
+    }
+
+    shareRoot.innerHTML = `
       <div class="bridge-project-share">
         <button
-          class="bridge-project-share__trigger"
+          class="bridge-project-share__trigger bridge-project-share__trigger--icon"
           type="button"
           data-project-share-toggle
           aria-haspopup="dialog"
           aria-expanded="${state.open ? "true" : "false"}"
+          aria-label="Share project"
+          data-tooltip="Share"
         >
-          <span>Share</span>
           <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
             <path d="M15.5 8.5 8.5 12l7 3.5"></path>
             <circle cx="17.5" cy="6.5" r="2.25"></circle>
