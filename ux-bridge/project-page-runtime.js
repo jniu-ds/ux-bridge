@@ -5811,13 +5811,8 @@ import { upload } from "@vercel/blob/client";
     }
 
     clearResponsiveChromeIntroTimer();
-    setResponsiveChromeVisibility(true, true);
-    document.body.classList.add("preview-viewport-responsive-intro");
-    responsiveChromeIntroTimer = window.setTimeout(() => {
-      document.body.classList.remove("preview-viewport-responsive-intro");
-      responsiveChromeIntroTimer = 0;
-      syncResponsiveChromeVisibility();
-    }, 2600);
+    setResponsiveChromeVisibility(false, false);
+    document.body.classList.remove("preview-viewport-responsive-intro");
   }
 
   function isPointInsideRect(clientX, clientY, rect) {
@@ -5835,7 +5830,7 @@ import { upload } from "@vercel/blob/client";
       return;
     }
 
-    const shouldEnableResponsiveChrome = isResponsiveViewportPreset();
+    const shouldEnableResponsiveChrome = false;
     document.body.classList.toggle("preview-viewport-responsive", shouldEnableResponsiveChrome);
 
     if (!shouldEnableResponsiveChrome) {
