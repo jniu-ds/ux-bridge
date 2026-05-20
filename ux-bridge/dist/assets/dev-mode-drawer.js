@@ -26,6 +26,8 @@
     activePreviewHoverElement: null,
   };
   let previewStateObserver = null;
+  let previewHoverOverlay = null;
+  let previewHoverOverlayFrame = 0;
 
   const style = document.createElement("style");
   style.textContent = `
@@ -73,6 +75,50 @@
         linear-gradient(135deg, rgba(164, 41, 236, 0.2) 0%, rgba(164, 41, 236, 0.08) 100%),
         #111827;
       border-color: rgba(164, 41, 236, 0.38);
+    }
+
+    .preview-dev-layer-hover-overlay {
+      position: fixed;
+      z-index: 1295;
+      pointer-events: none;
+      box-sizing: border-box;
+      border: 2px solid #2563eb;
+      border-radius: 2px;
+      opacity: 0;
+      transform: translate3d(0, 0, 0);
+      transition: opacity 0.08s ease;
+      box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.62), 0 10px 24px rgba(37, 99, 235, 0.22);
+    }
+
+    .preview-dev-layer-hover-overlay.is-visible {
+      opacity: 1;
+    }
+
+    body.breakpoint-specific-active .preview-dev-layer-hover-overlay {
+      border-color: #A429EC;
+      box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.62), 0 10px 24px rgba(164, 41, 236, 0.24);
+    }
+
+    .preview-dev-layer-hover-overlay__label {
+      position: absolute;
+      left: -2px;
+      top: calc(100% + 6px);
+      width: max-content;
+      max-width: 240px;
+      padding: 6px 9px;
+      border-radius: 999px;
+      background: #2563eb;
+      color: #ffffff;
+      font-size: 12px;
+      font-weight: 700;
+      line-height: 1;
+      letter-spacing: 0;
+      box-shadow: 0 12px 24px rgba(37, 99, 235, 0.24);
+    }
+
+    body.breakpoint-specific-active .preview-dev-layer-hover-overlay__label {
+      background: #A429EC;
+      box-shadow: 0 12px 24px rgba(164, 41, 236, 0.26);
     }
 
     .preview-dev-panel__header {
@@ -879,6 +925,63 @@
     );
   }
 
+  function ensurePreviewHoverOverlay() {
+    if (previewHoverOverlay instanceof HTMLElement) {
+      return previewHoverOverlay;
+    }
+
+    previewHoverOverlay = document.createElement("div");
+    previewHoverOverlay.className = "preview-dev-layer-hover-overlay";
+    previewHoverOverlay.setAttribute("data-preview-dev-layer-hover-overlay", "");
+    previewHoverOverlay.innerHTML = `<span class="preview-dev-layer-hover-overlay__label" data-preview-dev-layer-hover-label></span>`;
+    document.body.append(previewHoverOverlay);
+    return previewHoverOverlay;
+  }
+
+  function getPreviewHoverLabel(rect) {
+    const width = Math.max(0, rect.width);
+    const height = Math.max(0, rect.height);
+    const format = (value) => {
+      const rounded = Math.round(value * 100) / 100;
+      return Number.isInteger(rounded) ? String(rounded) : String(rounded);
+    };
+
+    return `${format(width)} x ${format(height)}`;
+  }
+
+  function syncPreviewHoverOverlay() {
+    previewHoverOverlayFrame = 0;
+    const overlay = ensurePreviewHoverOverlay();
+    const element = state.activePreviewHoverElement instanceof Element ? state.activePreviewHoverElement : null;
+
+    if (!state.open || state.mode !== "html" || !(element instanceof Element) || !element.isConnected) {
+      overlay.classList.remove("is-visible");
+      return;
+    }
+
+    const rect = element.getBoundingClientRect();
+
+    if (rect.width <= 0 || rect.height <= 0) {
+      overlay.classList.remove("is-visible");
+      return;
+    }
+
+    overlay.style.left = `${rect.left}px`;
+    overlay.style.top = `${rect.top}px`;
+    overlay.style.width = `${rect.width}px`;
+    overlay.style.height = `${rect.height}px`;
+    overlay.querySelector("[data-preview-dev-layer-hover-label]")?.replaceChildren(getPreviewHoverLabel(rect));
+    overlay.classList.add("is-visible");
+  }
+
+  function schedulePreviewHoverOverlaySync() {
+    if (previewHoverOverlayFrame) {
+      return;
+    }
+
+    previewHoverOverlayFrame = window.requestAnimationFrame(syncPreviewHoverOverlay);
+  }
+
   function activatePreviewHoverForLine(line) {
     const nextElement = line >= 0 ? getPreviewElementForHtmlLine(line) : null;
     const previousElement = state.activePreviewHoverElement instanceof Element ? state.activePreviewHoverElement : null;
@@ -896,12 +999,15 @@
     if (nextElement instanceof Element) {
       dispatchLayerMouseEvent(nextElement, "mouseover", previousElement || document.body);
     }
+
+    schedulePreviewHoverOverlaySync();
   }
 
   function setCodeHoveredLine(line) {
     const nextLine = Number.isInteger(line) && line >= 0 ? line : -1;
 
     if (state.hoveredHtmlLine === nextLine) {
+      schedulePreviewHoverOverlaySync();
       return;
     }
 
@@ -1265,6 +1371,7 @@
     syncLayout();
     ensurePreviewStateObserver();
     syncHtmlLayerDecorations();
+    schedulePreviewHoverOverlaySync();
   }
 
   function syncToggleState() {
@@ -1746,14 +1853,20 @@
   });
 
   mutationObserver.observe(document.body, { attributes: true, attributeFilter: ["class"] });
-  window.addEventListener("resize", syncLayout);
+  window.addEventListener("resize", () => {
+    syncLayout();
+    schedulePreviewHoverOverlaySync();
+  });
+  document.addEventListener("scroll", schedulePreviewHoverOverlaySync, true);
   window.addEventListener("uxbridge:drawer-open", () => {
     window.requestAnimationFrame(syncLayout);
     window.requestAnimationFrame(syncActionRailOrder);
+    window.requestAnimationFrame(syncPreviewHoverOverlay);
   });
   window.addEventListener("uxbridge:preview-layout-change", () => {
     window.requestAnimationFrame(syncLayout);
     window.requestAnimationFrame(syncActionRailOrder);
+    window.requestAnimationFrame(syncPreviewHoverOverlay);
   });
 
   initToggleWhenReady();
