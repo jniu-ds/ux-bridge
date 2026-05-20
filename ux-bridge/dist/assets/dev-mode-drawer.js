@@ -21,7 +21,11 @@
     renderedMode: "",
     renderedBreakpointMode: null,
     hoveredHtmlLine: -1,
+    previewHoveredHtmlLine: -1,
+    selectedHtmlLine: -1,
+    activePreviewHoverElement: null,
   };
+  let previewStateObserver = null;
 
   const style = document.createElement("style");
   style.textContent = `
@@ -199,6 +203,38 @@
       pointer-events: none;
       color: #dbeafe;
       background: transparent;
+    }
+
+    .preview-dev-panel__row-highlights {
+      position: absolute;
+      inset: 0;
+      z-index: 0;
+      overflow: hidden;
+      pointer-events: none;
+    }
+
+    .preview-dev-panel__row-highlight {
+      position: absolute;
+      left: 0;
+      right: 0;
+      height: var(--preview-dev-editor-line-height);
+      background: rgba(96, 165, 250, 0.11);
+      box-shadow: inset 2px 0 0 rgba(96, 165, 250, 0.7);
+    }
+
+    .preview-dev-panel__row-highlight.is-selected {
+      background: rgba(37, 99, 235, 0.18);
+      box-shadow: inset 2px 0 0 rgba(96, 165, 250, 0.95);
+    }
+
+    .preview-dev-panel.is-breakpoint-active .preview-dev-panel__row-highlight {
+      background: rgba(164, 41, 236, 0.14);
+      box-shadow: inset 2px 0 0 rgba(164, 41, 236, 0.78);
+    }
+
+    .preview-dev-panel.is-breakpoint-active .preview-dev-panel__row-highlight.is-selected {
+      background: rgba(164, 41, 236, 0.22);
+      box-shadow: inset 2px 0 0 rgba(164, 41, 236, 0.95);
     }
 
     .preview-dev-panel__code code {
@@ -689,7 +725,7 @@
       code.scrollLeft = editor.scrollLeft;
     }
 
-    syncHtmlLayerGutter();
+    syncHtmlLayerDecorations();
   }
 
   function syncHighlightText() {
@@ -699,7 +735,7 @@
       code.innerHTML = `${highlightCode(state.editorValue, state.mode)}\n`;
     }
 
-    syncHtmlLayerGutter();
+    syncHtmlLayerDecorations();
   }
 
   function getEditorMetric(editor, property, fallback) {
@@ -712,6 +748,8 @@
       return [];
     }
 
+    let ordinal = -1;
+
     return String(value || "")
       .split("\n")
       .map((line, index) => {
@@ -721,12 +759,206 @@
           return null;
         }
 
+        ordinal += 1;
+
         return {
           line: index,
+          ordinal,
           hidden: isHtmlLayerHidden(line),
         };
       })
       .filter(Boolean);
+  }
+
+  function getActiveHoverLine() {
+    return state.hoveredHtmlLine >= 0 ? state.hoveredHtmlLine : state.previewHoveredHtmlLine;
+  }
+
+  function getPreviewRenderRoot() {
+    const renderRoot = document.querySelector("[data-vibe-mobile-render]");
+    const generatedRoot = renderRoot?.querySelector?.(".vibe-generated-page");
+
+    if (generatedRoot instanceof Element) {
+      return generatedRoot;
+    }
+
+    const fallbackRoot = document.querySelector(".mobile-page .vibe-generated-page, .vibe-mobile-stage .vibe-generated-page");
+    return fallbackRoot instanceof Element ? fallbackRoot : null;
+  }
+
+  function getPreviewLayerElements() {
+    const root = getPreviewRenderRoot();
+
+    if (!(root instanceof Element)) {
+      return [];
+    }
+
+    return [root, ...Array.from(root.querySelectorAll("*"))];
+  }
+
+  function getHtmlLayerRowByLine(line) {
+    return getHtmlLayerRows().find((row) => row.line === line) || null;
+  }
+
+  function getHtmlLayerLineFromPointer(event) {
+    if (state.mode !== "html") {
+      return -1;
+    }
+
+    const editor = panel.querySelector("[data-preview-dev-editor]");
+
+    if (!(editor instanceof HTMLTextAreaElement)) {
+      return -1;
+    }
+
+    const rect = editor.getBoundingClientRect();
+    const lineHeight = getEditorMetric(editor, "line-height", 18.6);
+    const paddingTop = getEditorMetric(editor, "padding-top", 14);
+    const nextLine = Math.max(0, Math.floor((event.clientY - rect.top + editor.scrollTop - paddingTop) / lineHeight));
+
+    return getHtmlLayerRows().some((row) => row.line === nextLine) ? nextLine : -1;
+  }
+
+  function getPreviewElementForHtmlLine(line) {
+    const row = getHtmlLayerRowByLine(line);
+
+    if (!row) {
+      return null;
+    }
+
+    return getPreviewLayerElements()[row.ordinal] || null;
+  }
+
+  function getHtmlLineForPreviewElement(element) {
+    if (!(element instanceof Element)) {
+      return -1;
+    }
+
+    const elements = getPreviewLayerElements();
+    const index = elements.indexOf(element);
+
+    if (index < 0) {
+      return -1;
+    }
+
+    return getHtmlLayerRows()[index]?.line ?? -1;
+  }
+
+  function getClosestPreviewLayerElement(target) {
+    const root = getPreviewRenderRoot();
+
+    if (!(root instanceof Element)) {
+      return null;
+    }
+
+    let element = target instanceof Element ? target : target?.parentElement || null;
+
+    while (element instanceof Element && element !== document.body) {
+      if (element === root || root.contains(element)) {
+        return element;
+      }
+
+      element = element.parentElement;
+    }
+
+    return null;
+  }
+
+  function dispatchLayerMouseEvent(element, type, relatedTarget = null) {
+    if (!(element instanceof Element)) {
+      return;
+    }
+
+    element.dispatchEvent(
+      new MouseEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        view: window,
+        relatedTarget,
+      }),
+    );
+  }
+
+  function activatePreviewHoverForLine(line) {
+    const nextElement = line >= 0 ? getPreviewElementForHtmlLine(line) : null;
+    const previousElement = state.activePreviewHoverElement instanceof Element ? state.activePreviewHoverElement : null;
+
+    if (previousElement === nextElement) {
+      return;
+    }
+
+    if (previousElement) {
+      dispatchLayerMouseEvent(previousElement, "mouseout", nextElement || document.body);
+    }
+
+    state.activePreviewHoverElement = nextElement instanceof Element ? nextElement : null;
+
+    if (nextElement instanceof Element) {
+      dispatchLayerMouseEvent(nextElement, "mouseover", previousElement || document.body);
+    }
+  }
+
+  function setCodeHoveredLine(line) {
+    const nextLine = Number.isInteger(line) && line >= 0 ? line : -1;
+
+    if (state.hoveredHtmlLine === nextLine) {
+      return;
+    }
+
+    state.hoveredHtmlLine = nextLine;
+    activatePreviewHoverForLine(nextLine);
+    syncHtmlLayerDecorations();
+  }
+
+  function syncPreviewLayerStateFromDom() {
+    if (state.mode !== "html") {
+      state.previewHoveredHtmlLine = -1;
+      state.selectedHtmlLine = -1;
+      syncHtmlLayerDecorations();
+      return;
+    }
+
+    const root = getPreviewRenderRoot();
+
+    if (!(root instanceof Element)) {
+      return;
+    }
+
+    const hoveredElement = root.querySelector('[data-ux-layer-hovered]:not([data-ux-layer-hovered="false"])');
+    const selectedElement = root.querySelector('[data-ux-layer-selected]:not([data-ux-layer-selected="false"])');
+    const nextPreviewHoverLine = hoveredElement instanceof Element ? getHtmlLineForPreviewElement(hoveredElement) : -1;
+    const nextSelectedLine = selectedElement instanceof Element ? getHtmlLineForPreviewElement(selectedElement) : -1;
+
+    if (nextPreviewHoverLine !== state.previewHoveredHtmlLine || nextSelectedLine !== state.selectedHtmlLine) {
+      state.previewHoveredHtmlLine = nextPreviewHoverLine;
+      state.selectedHtmlLine = nextSelectedLine;
+      syncHtmlLayerDecorations();
+    }
+  }
+
+  function ensurePreviewStateObserver() {
+    const root = getPreviewRenderRoot();
+
+    if (!(root instanceof Element)) {
+      previewStateObserver?.disconnect();
+      previewStateObserver = null;
+      return;
+    }
+
+    if (previewStateObserver?.__previewRoot === root) {
+      return;
+    }
+
+    previewStateObserver?.disconnect();
+    previewStateObserver = new MutationObserver(() => syncPreviewLayerStateFromDom());
+    previewStateObserver.__previewRoot = root;
+    previewStateObserver.observe(root, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: ["data-ux-layer-hovered", "data-ux-layer-selected"],
+    });
+    syncPreviewLayerStateFromDom();
   }
 
   function isHtmlLayerHidden(line) {
@@ -744,28 +976,47 @@
       : `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z"></path><circle cx="12" cy="12" r="3"></circle></svg>`;
   }
 
-  function syncHtmlLayerGutter() {
+  function syncHtmlLayerDecorations() {
     const gutter = panel.querySelector("[data-preview-dev-layer-gutter]");
     const editor = panel.querySelector("[data-preview-dev-editor]");
+    const rowHighlights = panel.querySelector("[data-preview-dev-row-highlights]");
 
     if (!(gutter instanceof HTMLElement) || !(editor instanceof HTMLTextAreaElement) || state.mode !== "html") {
       if (gutter instanceof HTMLElement) {
         gutter.innerHTML = "";
       }
 
+      if (rowHighlights instanceof HTMLElement) {
+        rowHighlights.innerHTML = "";
+      }
+
       return;
     }
 
     const rows = getHtmlLayerRows();
-    const visibleRows = rows.filter((row) => row.hidden || row.line === state.hoveredHtmlLine);
+    const hoverLine = getActiveHoverLine();
+    const selectedLine = state.selectedHtmlLine;
+    const visibleRows = rows.filter((row) => row.hidden || row.line === hoverLine);
     const paddingTop = getEditorMetric(editor, "padding-top", 14);
     const lineHeight = getEditorMetric(editor, "line-height", 18.6);
     const scrollTop = editor.scrollTop || 0;
 
+    if (rowHighlights instanceof HTMLElement) {
+      const highlightRows = rows.filter((row) => row.line === hoverLine || row.line === selectedLine);
+      rowHighlights.innerHTML = highlightRows
+        .map((row) => {
+          const top = paddingTop + row.line * lineHeight - scrollTop;
+          const selectedClass = row.line === selectedLine ? " is-selected" : "";
+
+          return `<div class="preview-dev-panel__row-highlight${selectedClass}" style="top: ${top}px; height: ${lineHeight}px;"></div>`;
+        })
+        .join("");
+    }
+
     gutter.innerHTML = visibleRows
       .map((row) => {
         const top = paddingTop + row.line * lineHeight - scrollTop;
-        const visibleClass = row.line === state.hoveredHtmlLine || row.hidden ? " is-visible" : "";
+        const visibleClass = row.line === hoverLine || row.hidden ? " is-visible" : "";
         const hiddenClass = row.hidden ? " is-hidden" : "";
         const label = row.hidden ? "Unhide HTML layer" : "Hide HTML layer";
 
@@ -935,6 +1186,27 @@
     setStatus("Unsaved changes");
   }
 
+  function selectPreviewElementForHtmlLine(line) {
+    const element = getPreviewElementForHtmlLine(line);
+
+    if (!(element instanceof Element)) {
+      return;
+    }
+
+    state.selectedHtmlLine = line;
+    syncHtmlLayerDecorations();
+
+    element.dispatchEvent(
+      new MouseEvent("click", {
+        bubbles: true,
+        cancelable: true,
+        view: window,
+      }),
+    );
+
+    window.requestAnimationFrame(syncPreviewLayerStateFromDom);
+  }
+
   function render() {
     syncModeToBreakpointState({ preserveDirty: true });
     const tabs = getModeTabs();
@@ -971,6 +1243,7 @@
         </nav>
       </header>
       <div class="preview-dev-panel__body" data-preview-dev-body>
+        <div class="preview-dev-panel__row-highlights" data-preview-dev-row-highlights></div>
         <div class="preview-dev-panel__layer-gutter" data-preview-dev-layer-gutter></div>
         <pre class="preview-dev-panel__code" data-preview-dev-code aria-hidden="true"><code>${highlightCode(state.editorValue, state.mode)}\n</code></pre>
         <textarea class="preview-dev-panel__editor" data-preview-dev-editor spellcheck="false" aria-label="${escapeHtml(state.mode)} editor">${escapeHtml(state.editorValue)}</textarea>
@@ -990,7 +1263,8 @@
 
     syncToggleState();
     syncLayout();
-    syncHtmlLayerGutter();
+    ensurePreviewStateObserver();
+    syncHtmlLayerDecorations();
   }
 
   function syncToggleState() {
@@ -1069,6 +1343,14 @@
       event.preventDefault();
       void save();
     }
+
+    if (target.closest("[data-preview-dev-body]") && state.mode === "html") {
+      const line = getHtmlLayerLineFromPointer(event);
+
+      if (line >= 0) {
+        selectPreviewElementForHtmlLine(line);
+      }
+    }
   });
 
   panel.addEventListener("input", (event) => {
@@ -1111,23 +1393,7 @@
       return;
     }
 
-    const editor = panel.querySelector("[data-preview-dev-editor]");
-
-    if (!(editor instanceof HTMLTextAreaElement)) {
-      return;
-    }
-
-    const rect = editor.getBoundingClientRect();
-    const lineHeight = getEditorMetric(editor, "line-height", 18.6);
-    const paddingTop = getEditorMetric(editor, "padding-top", 14);
-    const nextLine = Math.max(0, Math.floor((event.clientY - rect.top + editor.scrollTop - paddingTop) / lineHeight));
-    const rows = getHtmlLayerRows();
-    const hoverLine = rows.some((row) => row.line === nextLine) ? nextLine : -1;
-
-    if (hoverLine !== state.hoveredHtmlLine) {
-      state.hoveredHtmlLine = hoverLine;
-      syncHtmlLayerGutter();
-    }
+    setCodeHoveredLine(getHtmlLayerLineFromPointer(event));
   });
 
   panel.addEventListener("pointerleave", (event) => {
@@ -1137,9 +1403,58 @@
       return;
     }
 
-    if (state.hoveredHtmlLine !== -1) {
-      state.hoveredHtmlLine = -1;
-      syncHtmlLayerGutter();
+    setCodeHoveredLine(-1);
+  });
+
+  document.addEventListener("mouseover", (event) => {
+    if (state.mode !== "html" || !state.open || panel.contains(event.target)) {
+      return;
+    }
+
+    const element = getClosestPreviewLayerElement(event.target);
+    const line = getHtmlLineForPreviewElement(element);
+
+    if (line >= 0 && line !== state.previewHoveredHtmlLine) {
+      state.previewHoveredHtmlLine = line;
+      syncHtmlLayerDecorations();
+    }
+  });
+
+  document.addEventListener("mouseout", (event) => {
+    if (state.mode !== "html" || !state.open || panel.contains(event.target)) {
+      return;
+    }
+
+    const element = getClosestPreviewLayerElement(event.target);
+
+    if (!(element instanceof Element)) {
+      return;
+    }
+
+    const relatedElement = getClosestPreviewLayerElement(event.relatedTarget);
+
+    if (relatedElement === element || (relatedElement instanceof Element && element.contains(relatedElement))) {
+      return;
+    }
+
+    if (state.previewHoveredHtmlLine !== -1) {
+      state.previewHoveredHtmlLine = -1;
+      syncHtmlLayerDecorations();
+    }
+  });
+
+  document.addEventListener("click", (event) => {
+    if (state.mode !== "html" || !state.open || panel.contains(event.target)) {
+      return;
+    }
+
+    const element = getClosestPreviewLayerElement(event.target);
+    const line = getHtmlLineForPreviewElement(element);
+
+    if (line >= 0) {
+      state.selectedHtmlLine = line;
+      syncHtmlLayerDecorations();
+      window.requestAnimationFrame(syncPreviewLayerStateFromDom);
     }
   });
 
