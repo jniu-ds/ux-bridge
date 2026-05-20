@@ -2,7 +2,7 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "cleanUrls": false,
   "trailingSlash": false,
-  "buildCommand": "npm run build",
+  "buildCommand": "echo using committed dist output",
   "outputDirectory": "dist",
   "redirects": [
     {
