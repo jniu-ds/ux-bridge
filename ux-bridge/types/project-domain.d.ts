@@ -3,6 +3,7 @@ export interface PageFileMetadata {
   rootPath: string;
   configPath: string;
   previewPath: string;
+  scriptPath: string;
   componentPath: string;
   promptPath: string;
 }
@@ -13,6 +14,7 @@ export interface PagePreview {
   summary: string;
   html: string;
   css: string;
+  js?: string;
   stageStyle?: string;
   generatedAt: number;
   appliedAt: number;

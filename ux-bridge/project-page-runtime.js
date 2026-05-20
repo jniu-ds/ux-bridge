@@ -37,6 +37,48 @@
     lastProjectChangeAt: 0,
   };
 
+  function cleanupPreviewScript() {
+    const cleanup = vibeMobileRender?.__uxBridgePreviewCleanup;
+
+    if (typeof cleanup === "function") {
+      try {
+        cleanup();
+      } catch (error) {
+        console.warn("[project-page] preview.js cleanup failed", error);
+      }
+    }
+
+    if (vibeMobileRender) {
+      vibeMobileRender.__uxBridgePreviewCleanup = null;
+    }
+  }
+
+  function runPreviewScript(page, preview) {
+    cleanupPreviewScript();
+
+    if (!vibeMobileRender) {
+      return;
+    }
+
+    const previewJs = String(preview?.js || "").trim();
+
+    if (!previewJs) {
+      return;
+    }
+
+    const root = vibeMobileRender.firstElementChild instanceof HTMLElement ? vibeMobileRender.firstElementChild : vibeMobileRender;
+
+    try {
+      const cleanup = new Function("root", "page", "project", "api", previewJs)(root, page, state.project, {});
+
+      if (typeof cleanup === "function") {
+        vibeMobileRender.__uxBridgePreviewCleanup = cleanup;
+      }
+    } catch (error) {
+      console.warn("[project-page] preview.js failed", error);
+    }
+  }
+
   function getCurrentUserEmail() {
     return String(window.uxBridgeUser?.email || "").trim().toLowerCase();
   }
@@ -54,6 +96,7 @@
     vibeMobileStage.hidden = !hasAppliedContent;
 
     if (!hasAppliedContent) {
+      cleanupPreviewScript();
       vibeMobileStyle.textContent = "";
       vibeMobileRender.innerHTML = "";
       return;
@@ -61,6 +104,7 @@
 
     vibeMobileStyle.textContent = String(preview.css || "");
     vibeMobileRender.innerHTML = String(preview.html || "");
+    runPreviewScript(page, preview);
   }
 
   function resizeTitleInput() {

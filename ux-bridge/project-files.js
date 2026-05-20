@@ -67,6 +67,7 @@ export function buildPageFileMetadata(projectId, page) {
     rootPath: pageRoot,
     configPath: join(pageRoot, "page.config.json"),
     previewPath: join(pageRoot, "page.preview.json"),
+    scriptPath: join(pageRoot, "page.preview.js"),
     componentPath: join(pageRoot, "page.tsx"),
     promptPath: join(pageRoot, "page.prompt.md"),
   };
@@ -140,6 +141,7 @@ Guidance:
 - Generate front-end UI only
 - Do not create routing, backend services, auth, or a nested application shell
 - Keep output focused on the mobile preview viewport
+- Use page.preview.js for scoped interactions when the UI needs richer behavior
 `;
 }
 
@@ -149,14 +151,48 @@ Guidance:
  */
 function buildPageComponent(project, page) {
   const preview = buildPagePreview(page);
+  const pageMeta = JSON.stringify({ id: page.id, name: page.name });
+  const projectMeta = JSON.stringify({ id: project.id, name: project.name });
 
   if (preview?.html) {
-    return `const previewCss = \`${escapeTemplateLiteral(preview.css || "")}\`;
+    return `import { useEffect, useRef } from "react";
+
+const previewCss = \`${escapeTemplateLiteral(preview.css || "")}\`;
 const previewHtml = \`${escapeTemplateLiteral(preview.html || "")}\`;
+const previewJs = \`${escapeTemplateLiteral(preview.js || "")}\`;
 
 export function ${normalizeComponentName(page.name)}Page() {
+  const rootRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    const root = rootRef.current;
+
+    if (!root || !previewJs.trim()) {
+      return undefined;
+    }
+
+    let cleanup;
+
+    try {
+      cleanup = new Function("root", "page", "project", "api", previewJs)(
+        root,
+        ${pageMeta},
+        ${projectMeta},
+        {},
+      );
+    } catch (error) {
+      console.warn("[ux-bridge] preview.js failed", error);
+    }
+
+    return () => {
+      if (typeof cleanup === "function") {
+        cleanup();
+      }
+    };
+  }, []);
+
   return (
-    <section className="vibe-generated-page" data-page-id="${escapeTemplateLiteral(page.id)}">
+    <section ref={rootRef} className="vibe-generated-page" data-page-id="${escapeTemplateLiteral(page.id)}">
       {previewCss ? <style>{previewCss}</style> : null}
       <div dangerouslySetInnerHTML={{ __html: previewHtml }} />
     </section>
@@ -196,11 +232,12 @@ function escapeTemplateLiteral(value = "") {
 }
 
 /**
- * @param {unknown} preview
- * @returns {PagePreview | null}
+ * @param {unknown} value
+ * @returns {Record<string, Record<string, { styles?: Record<string, string | null>, attrs?: Record<string, string | null>, text?: string }>>}
  */
 export function normalizePreviewBreakpointOverrides(value) {
-  const input = value && typeof value === "object" ? value : {};
+  const input = value && typeof value === "object" ? /** @type {Record<string, unknown>} */ (value) : {};
+  /** @type {Record<string, Record<string, { styles?: Record<string, string | null>, attrs?: Record<string, string | null>, text?: string }>>} */
   const normalized = {};
 
   Object.entries(input).forEach(([layerPath, breakpointMap]) => {
@@ -210,6 +247,7 @@ export function normalizePreviewBreakpointOverrides(value) {
       return;
     }
 
+    /** @type {Record<string, { styles?: Record<string, string | null>, attrs?: Record<string, string | null>, text?: string }>} */
     const normalizedBreakpointMap = {};
 
     Object.entries(breakpointMap).forEach(([breakpointId, override]) => {
@@ -220,7 +258,9 @@ export function normalizePreviewBreakpointOverrides(value) {
       }
 
       const overrideInput = /** @type {Record<string, unknown>} */ (override);
+      /** @type {Record<string, string | null>} */
       const styles = {};
+      /** @type {Record<string, string | null>} */
       const attrs = {};
 
       if (overrideInput.styles && typeof overrideInput.styles === "object") {
@@ -243,6 +283,7 @@ export function normalizePreviewBreakpointOverrides(value) {
         });
       }
 
+      /** @type {{ styles?: Record<string, string | null>, attrs?: Record<string, string | null>, text?: string }} */
       const normalizedOverride = { styles, attrs };
 
       if (Object.prototype.hasOwnProperty.call(overrideInput, "text")) {
@@ -266,6 +307,10 @@ export function normalizePreviewBreakpointOverrides(value) {
   return normalized;
 }
 
+/**
+ * @param {unknown} preview
+ * @returns {PagePreview | null}
+ */
 export function normalizePagePreview(preview) {
   if (!preview || typeof preview !== "object") {
     return null;
@@ -274,6 +319,7 @@ export function normalizePagePreview(preview) {
   const candidate = /** @type {Record<string, unknown>} */ (preview);
   const html = String(candidate.html || "").trim();
   const css = String(candidate.css || "").trim();
+  const js = String(candidate.js || "").trim();
   const summary = String(candidate.summary || "").trim();
 
   if (!html) {
@@ -286,6 +332,7 @@ export function normalizePagePreview(preview) {
     summary,
     html,
     css,
+    js,
     stageStyle: String(candidate.stageStyle || "").trim(),
     generatedAt: Number(candidate.generatedAt) || 0,
     appliedAt: Number(candidate.appliedAt) || 0,
@@ -346,6 +393,19 @@ async function readJsonFile(path, fallback) {
 }
 
 /**
+ * @param {string} path
+ * @param {string | null} fallback
+ * @returns {Promise<string | null>}
+ */
+async function readTextFile(path, fallback = null) {
+  try {
+    return await readFile(path, "utf8");
+  } catch {
+    return fallback;
+  }
+}
+
+/**
  * @param {ProjectRecord} project
  */
 async function writeProjectManifests(project) {
@@ -378,6 +438,7 @@ async function writeProjectManifests(project) {
       name: page.name,
       fileSlug: page.fileSlug,
       previewPath: page.files?.previewPath || "",
+      scriptPath: page.files?.scriptPath || "",
       componentPath: page.files?.componentPath || "",
       promptPath: page.files?.promptPath || "",
       configPath: page.files?.configPath || "",
@@ -399,7 +460,9 @@ export async function scaffoldPageFiles(project, page, options = {}) {
     files,
   };
   await writeJsonFile(files.configPath, buildPageConfig(project, pageWithFiles));
-  await writeJsonFile(files.previewPath, buildPagePreview(pageWithFiles) || null);
+  const preview = buildPagePreview(pageWithFiles);
+  await writeJsonFile(files.previewPath, preview || null);
+  await writeFile(files.scriptPath, String(preview?.js || ""), "utf8");
   const overwrite = options.overwrite === true;
 
   if (overwrite) {
@@ -490,7 +553,14 @@ export async function hydrateProjectPreviewFiles(project) {
 
   for (const page of Array.isArray(project.pages) ? project.pages : []) {
     const files = page.files || buildPageFileMetadata(project.id, page);
-    const preview = normalizePagePreview(await readJsonFile(files.previewPath, null));
+    const rawPreview = await readJsonFile(files.previewPath, null);
+    const previewScript = await readTextFile(files.scriptPath, null);
+    const previewInput = rawPreview && typeof rawPreview === "object" ? /** @type {Record<string, unknown>} */ (rawPreview) : null;
+    const preview = normalizePagePreview(
+      previewInput
+        ? { ...previewInput, js: previewScript !== null ? previewScript : previewInput.js }
+        : rawPreview,
+    );
     nextPages.push({
       ...page,
       files,

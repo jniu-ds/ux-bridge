@@ -496,6 +496,7 @@ function normalizeVibeDraft(draft) {
     summary: String(draft.summary || "").trim(),
     html: String(draft.html || "").trim(),
     css: String(draft.css || "").trim(),
+    js: String(draft.js || "").trim(),
     stageStyle: String(draft.stageStyle || "").trim(),
     generatedAt: Number(draft.generatedAt) || 0,
     assets: Array.isArray(draft.assets) ? draft.assets : [],
@@ -2358,6 +2359,8 @@ export async function handleProjectsRequest(req) {
     const currentPreview = buildPagePreview(page);
     const fallbackHtml = String(payload.html || "").trim();
     const fallbackCss = String(payload.css || "");
+    const hasPayloadJs = Object.prototype.hasOwnProperty.call(payload, "js");
+    const fallbackJs = String(payload.js || "");
     const fallbackStageStyle = String(payload.stageStyle || "").trim();
     const nextPreview = normalizePagePreview({
       ...(currentPreview || {}),
@@ -2366,6 +2369,7 @@ export async function handleProjectsRequest(req) {
       summary: String(payload.summary || currentPreview?.summary || "").trim(),
       html: syncBase ? fallbackHtml : currentPreview?.html || fallbackHtml,
       css: syncBase ? fallbackCss : currentPreview?.css || fallbackCss,
+      js: syncBase ? (hasPayloadJs ? fallbackJs : currentPreview?.js || "") : currentPreview?.js || fallbackJs,
       stageStyle: syncBase ? fallbackStageStyle : currentPreview?.stageStyle || fallbackStageStyle,
       generatedAt: Number(currentPreview?.generatedAt) || now,
       appliedAt: Number(currentPreview?.appliedAt) || now,
@@ -2496,6 +2500,7 @@ export async function handleProjectsRequest(req) {
       summary: generated.summary,
       html: generated.html,
       css: generated.css,
+      js: generated.js,
       generatedAt,
       assets: generated.assets,
       credentialMode: generated.credentialMode,
@@ -2582,6 +2587,7 @@ export async function handleProjectsRequest(req) {
         summary: payload.generated?.summary,
         html: payload.generated?.html,
         css: payload.generated?.css,
+        js: payload.generated?.js,
         assets: payload.generated?.assets,
         credentialMode: payload.generated?.credentialMode,
         availableVia: payload.generated?.availableVia,
@@ -2603,6 +2609,7 @@ export async function handleProjectsRequest(req) {
       summary: generated.summary,
       html: generated.html,
       css: generated.css,
+      js: generated.js,
       generatedAt,
       assets: generated.assets,
       credentialMode: generated.credentialMode,

@@ -296,6 +296,30 @@ function renderMockCss() {
       color: #252525;
       box-shadow: inset 0 0 0 1px rgba(37, 37, 37, 0.12);
     }
+
+    .vibe-generated-page__actions button.is-active {
+      background: #5b5ff4;
+      color: #fff;
+      box-shadow: 0 12px 24px rgba(91, 95, 244, 0.2);
+    }
+  `;
+}
+
+function renderMockJs() {
+  return `
+const actionButtons = Array.from(root.querySelectorAll(".vibe-generated-page__actions button"));
+
+const handleActionClick = (event) => {
+  actionButtons.forEach((button) => button.classList.remove("is-active"));
+  event.currentTarget.classList.add("is-active");
+  root.dataset.previewInteraction = event.currentTarget.textContent.trim();
+};
+
+actionButtons.forEach((button) => button.addEventListener("click", handleActionClick));
+
+return () => {
+  actionButtons.forEach((button) => button.removeEventListener("click", handleActionClick));
+};
   `;
 }
 
@@ -317,6 +341,7 @@ export function validateGeneratedVibePayload(result = {}) {
     summary: String(result.summary || "").trim() || `${provider.label} generated a page-scoped UI concept.`,
     html: validateGeneratedHtml(result.html),
     css: validateGeneratedCss(result.css),
+    js: validateGeneratedJs(result.js),
     assets: Array.isArray(result.assets) ? result.assets : [],
   };
 }
@@ -348,6 +373,7 @@ export function generateScaffoldedVibePageResult({
     summary: `${provider.label} created a page-scoped UI concept${contextSummary ? ` using ${contextSummary}` : ""}.`,
     html: renderMockHtml(copy, promptSummary, projectName, pageName),
     css: renderMockCss(),
+    js: renderMockJs(),
     assets: [],
   });
 }
@@ -356,11 +382,14 @@ function buildCodexSystemPrompt() {
   return [
     "You generate only front-end mobile page content for UX Bridge.",
     "Return JSON only.",
-    "Do not generate a whole application shell, routing, auth, backend code, scripts, or head/body/html tags.",
+    "Do not generate a whole application shell, routing, auth, backend code, or head/body/html tags.",
     "Generate only content that belongs inside the current mobile-page content area.",
     "The html must use a single root element with class=\"vibe-generated-page\".",
     "The css must scope all selectors to .vibe-generated-page and must not target body, html, :root, or global app shells.",
     "Do not include <script> tags or inline event handlers.",
+    "Put interaction code in the js field for preview.js. The js runs after HTML mounts as new Function(\"root\", \"page\", \"project\", \"api\", js).",
+    "Use root.querySelector/querySelectorAll to attach scoped event listeners, manage local state in closure variables, and return a cleanup function when listeners or timers are created.",
+    "Do not use imports, exports, network requests, document.write, inline handlers, or selectors outside root.",
     "Keep the output polished, intentional, and mobile-first.",
   ].join(" ");
 }
@@ -383,7 +412,8 @@ function buildCodexUserPrompt({
   return [
     "Create a page-scoped mobile UI concept for the current UX Bridge page.",
     contextLines.join("\n"),
-    "Return JSON with keys: summary, html, css, assets.",
+    "Return JSON with keys: summary, html, css, js, assets.",
+    "Use js for rich interactions such as toggles, filters, accordions, tab states, sliders, counters, or lightweight animation behavior.",
     "assets should be an empty array unless you truly need named assets.",
   ].join("\n\n");
 }
@@ -466,6 +496,28 @@ function validateGeneratedCss(css) {
   return trimmed;
 }
 
+function validateGeneratedJs(js) {
+  const trimmed = String(js || "").trim();
+
+  if (!trimmed) {
+    return "";
+  }
+
+  if (/<\/?script\b/i.test(trimmed)) {
+    throw new Error("Codex returned script tags inside preview.js.");
+  }
+
+  if (/\b(?:import|export)\b/i.test(trimmed) || /\bdocument\.write\b/i.test(trimmed)) {
+    throw new Error("Codex returned unsupported JavaScript for preview.js.");
+  }
+
+  if (/\bfetch\s*\(/i.test(trimmed) || /\bXMLHttpRequest\b/i.test(trimmed)) {
+    throw new Error("Codex returned network code for preview.js.");
+  }
+
+  return trimmed;
+}
+
 async function generateCodexPageResult({
   prompt,
   projectName,
@@ -500,11 +552,12 @@ async function generateCodexPageResult({
         schema: {
           type: "object",
           additionalProperties: false,
-          required: ["summary", "html", "css", "assets"],
+          required: ["summary", "html", "css", "js", "assets"],
           properties: {
             summary: { type: "string" },
             html: { type: "string" },
             css: { type: "string" },
+            js: { type: "string" },
             assets: {
               type: "array",
               items: {
@@ -570,6 +623,7 @@ async function generateCodexPageResult({
       summary: String(parsed.summary || "").trim() || "Codex generated a page-scoped UI concept.",
       html: validateGeneratedHtml(parsed.html),
       css: validateGeneratedCss(parsed.css),
+      js: validateGeneratedJs(parsed.js),
       assets: Array.isArray(parsed.assets) ? parsed.assets : [],
     };
   }
