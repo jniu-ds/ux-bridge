@@ -207,6 +207,10 @@
       font-weight: 700;
     }
 
+    .preview-dev-panel__token--punctuation {
+      color: #94a3b8;
+    }
+
     .preview-dev-panel__token--attr,
     .preview-dev-panel__token--property {
       color: #c084fc;
@@ -224,6 +228,10 @@
     .preview-dev-panel__token--comment {
       color: #64748b;
       font-style: italic;
+    }
+
+    .preview-dev-panel__token--operator {
+      color: #f472b6;
     }
 
     .preview-dev-panel__editor {
@@ -361,16 +369,49 @@
   }
 
   function highlightHtml(value) {
+    const highlightTag = (tag) => {
+      if (tag.startsWith("<!--")) {
+        return `<span class="preview-dev-panel__token--comment">${escapeHtml(tag)}</span>`;
+      }
+
+      const parts = tag.match(/^(<\/?)([A-Za-z][\w:-]*)([\s\S]*?)(\/?>)$/);
+
+      if (!parts) {
+        return `<span class="preview-dev-panel__token--tag">${escapeHtml(tag)}</span>`;
+      }
+
+      const [, open, name, attrs = "", close] = parts;
+      const highlightedAttrs = tokenizePattern(
+        attrs,
+        /(\s+)([^\s=/>]+)(?:\s*(=)\s*("(?:(?:\\")|[^"])*"|'(?:(?:\\')|[^'])*'|[^\s>]+))?/g,
+        (match, space, attrName, equals, attrValue) => {
+          let output = escapeHtml(space);
+          output += `<span class="preview-dev-panel__token--attr">${escapeHtml(attrName)}</span>`;
+
+          if (equals) {
+            output += `<span class="preview-dev-panel__token--operator">${escapeHtml(equals)}</span>`;
+          }
+
+          if (attrValue) {
+            output += `<span class="preview-dev-panel__token--string">${escapeHtml(attrValue)}</span>`;
+          }
+
+          return output;
+        },
+      );
+
+      return [
+        `<span class="preview-dev-panel__token--punctuation">${escapeHtml(open)}</span>`,
+        `<span class="preview-dev-panel__token--tag">${escapeHtml(name)}</span>`,
+        highlightedAttrs,
+        `<span class="preview-dev-panel__token--punctuation">${escapeHtml(close)}</span>`,
+      ].join("");
+    };
+
     return tokenizePattern(
       value,
       /<!--[\s\S]*?-->|<\/?[A-Za-z][^>\s/]*(?:\s+[^\s=/>]+(?:=(?:"[^"]*"|'[^']*'|[^\s>]+))?)*\s*\/?>/g,
-      (match) => {
-        if (match.startsWith("<!--")) {
-          return `<span class="preview-dev-panel__token--comment">${escapeHtml(match)}</span>`;
-        }
-
-        return `<span class="preview-dev-panel__token--tag">${escapeHtml(match)}</span>`;
-      },
+      highlightTag,
     );
   }
 
