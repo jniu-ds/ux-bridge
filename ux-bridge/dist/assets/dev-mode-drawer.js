@@ -1276,6 +1276,78 @@
     }
   }
 
+  let actionRailOrderObserver = null;
+  let actionRailOrderSyncing = false;
+
+  function getActionRailRank(node) {
+    if (!(node instanceof Element)) {
+      return 50;
+    }
+
+    if (node.matches("[data-vibe-drawer-toggle], [data-customizer-drawer-toggle]")) {
+      return 20;
+    }
+
+    if (node.matches("[data-comments-drawer-toggle]")) {
+      return 30;
+    }
+
+    if (node.matches("[data-uploads-drawer-toggle]")) {
+      return 40;
+    }
+
+    if (node.matches("[data-preview-dev-divider]")) {
+      return 90;
+    }
+
+    if (node.matches("[data-preview-dev-toggle]")) {
+      return 100;
+    }
+
+    return 10;
+  }
+
+  function syncActionRailOrder() {
+    const sideActions = document.querySelector("[data-side-actions]");
+
+    if (!(sideActions instanceof HTMLElement) || actionRailOrderSyncing) {
+      return;
+    }
+
+    const currentChildren = Array.from(sideActions.children);
+    const orderedChildren = currentChildren
+      .map((node, index) => ({ node, index, rank: getActionRailRank(node) }))
+      .sort((first, second) => first.rank - second.rank || first.index - second.index)
+      .map((entry) => entry.node);
+
+    const alreadyOrdered = orderedChildren.every((node, index) => node === currentChildren[index]);
+
+    if (alreadyOrdered) {
+      return;
+    }
+
+    actionRailOrderSyncing = true;
+
+    try {
+      orderedChildren.forEach((node) => sideActions.append(node));
+    } finally {
+      actionRailOrderSyncing = false;
+    }
+  }
+
+  function observeActionRailOrder() {
+    const sideActions = document.querySelector("[data-side-actions]");
+
+    if (!(sideActions instanceof HTMLElement) || actionRailOrderObserver) {
+      return;
+    }
+
+    actionRailOrderObserver = new MutationObserver(() => {
+      window.requestAnimationFrame(syncActionRailOrder);
+    });
+    actionRailOrderObserver.observe(sideActions, { childList: true });
+  }
+
   function setOpen(nextOpen) {
     state.open = !!nextOpen;
 
@@ -1592,8 +1664,14 @@
   function setupToggle() {
     const sideActions = document.querySelector("[data-side-actions]");
 
-    if (!sideActions || document.querySelector("[data-preview-dev-toggle]")) {
-      return !!document.querySelector("[data-preview-dev-toggle]");
+    if (!sideActions) {
+      return false;
+    }
+
+    if (document.querySelector("[data-preview-dev-toggle]")) {
+      observeActionRailOrder();
+      syncActionRailOrder();
+      return true;
     }
 
     const uploadsToggle = sideActions.querySelector("[data-uploads-drawer-toggle]");
@@ -1604,6 +1682,7 @@
 
     const divider = document.createElement("span");
     divider.className = "preview-dev-divider";
+    divider.setAttribute("data-preview-dev-divider", "");
     divider.setAttribute("aria-hidden", "true");
 
     const toggle = document.createElement("button");
@@ -1623,6 +1702,8 @@
     toggle.addEventListener("click", () => setOpen(!state.open));
 
     sideActions.append(divider, toggle);
+    observeActionRailOrder();
+    syncActionRailOrder();
     syncToggleState();
     return true;
   }
@@ -1666,8 +1747,14 @@
 
   mutationObserver.observe(document.body, { attributes: true, attributeFilter: ["class"] });
   window.addEventListener("resize", syncLayout);
-  window.addEventListener("uxbridge:drawer-open", () => window.requestAnimationFrame(syncLayout));
-  window.addEventListener("uxbridge:preview-layout-change", () => window.requestAnimationFrame(syncLayout));
+  window.addEventListener("uxbridge:drawer-open", () => {
+    window.requestAnimationFrame(syncLayout);
+    window.requestAnimationFrame(syncActionRailOrder);
+  });
+  window.addEventListener("uxbridge:preview-layout-change", () => {
+    window.requestAnimationFrame(syncLayout);
+    window.requestAnimationFrame(syncActionRailOrder);
+  });
 
   initToggleWhenReady();
   void loadProject();
