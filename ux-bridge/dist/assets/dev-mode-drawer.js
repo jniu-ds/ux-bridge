@@ -865,6 +865,27 @@
     return getHtmlLayerRows().some((row) => row.line === nextLine) ? nextLine : -1;
   }
 
+  function getHtmlLayerLineFromEditorSelection(editor) {
+    if (state.mode !== "html" || !(editor instanceof HTMLTextAreaElement)) {
+      return -1;
+    }
+
+    const selectionStart = Number.isFinite(editor.selectionStart) ? editor.selectionStart : 0;
+    const valueBeforeSelection = editor.value.slice(0, Math.max(0, selectionStart));
+    const selectionLine = valueBeforeSelection.split("\n").length - 1;
+    const rows = getHtmlLayerRows(editor.value);
+
+    if (rows.some((row) => row.line === selectionLine)) {
+      return selectionLine;
+    }
+
+    const previousRow = rows
+      .filter((row) => row.line < selectionLine)
+      .sort((first, second) => second.line - first.line)[0];
+
+    return previousRow?.line ?? -1;
+  }
+
   function getPreviewElementForHtmlLine(line) {
     const row = getHtmlLayerRowByLine(line);
 
@@ -1302,15 +1323,38 @@
     state.selectedHtmlLine = line;
     syncHtmlLayerDecorations();
 
-    element.dispatchEvent(
-      new MouseEvent("click", {
-        bubbles: true,
-        cancelable: true,
-        view: window,
-      }),
-    );
+    const rect = element.getBoundingClientRect();
+    const clientX = rect.left + Math.max(1, Math.min(rect.width / 2, rect.width - 1));
+    const clientY = rect.top + Math.max(1, Math.min(rect.height / 2, rect.height - 1));
+    const eventOptions = {
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      view: window,
+      clientX,
+      clientY,
+      button: 0,
+      buttons: 1,
+    };
+
+    if (typeof PointerEvent === "function") {
+      element.dispatchEvent(new PointerEvent("pointerdown", { ...eventOptions, pointerId: 1, pointerType: "mouse" }));
+      element.dispatchEvent(new PointerEvent("pointerup", { ...eventOptions, pointerId: 1, pointerType: "mouse", buttons: 0 }));
+    }
+
+    element.dispatchEvent(new MouseEvent("mousedown", eventOptions));
+    element.dispatchEvent(new MouseEvent("mouseup", { ...eventOptions, buttons: 0 }));
+    element.dispatchEvent(new MouseEvent("click", { ...eventOptions, buttons: 0 }));
 
     window.requestAnimationFrame(syncPreviewLayerStateFromDom);
+  }
+
+  function selectPreviewElementForEditorCaret(editor) {
+    const line = getHtmlLayerLineFromEditorSelection(editor);
+
+    if (line >= 0) {
+      selectPreviewElementForHtmlLine(line);
+    }
   }
 
   function render() {
@@ -1523,6 +1567,11 @@
       void save();
     }
 
+    if (target instanceof HTMLTextAreaElement && target.matches("[data-preview-dev-editor]") && state.mode === "html") {
+      window.requestAnimationFrame(() => selectPreviewElementForEditorCaret(target));
+      return;
+    }
+
     if (target.closest("[data-preview-dev-body]") && state.mode === "html") {
       const line = getHtmlLayerLineFromPointer(event);
 
@@ -1583,6 +1632,30 @@
     }
 
     setCodeHoveredLine(-1);
+  });
+
+  panel.addEventListener("keyup", (event) => {
+    const target = event.target;
+
+    if (!(target instanceof HTMLTextAreaElement) || !target.matches("[data-preview-dev-editor]") || state.mode !== "html") {
+      return;
+    }
+
+    const navigationKeys = new Set(["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown"]);
+
+    if (navigationKeys.has(event.key)) {
+      selectPreviewElementForEditorCaret(target);
+    }
+  });
+
+  panel.addEventListener("select", (event) => {
+    const target = event.target;
+
+    if (!(target instanceof HTMLTextAreaElement) || !target.matches("[data-preview-dev-editor]") || state.mode !== "html") {
+      return;
+    }
+
+    window.requestAnimationFrame(() => selectPreviewElementForEditorCaret(target));
   });
 
   document.addEventListener("mouseover", (event) => {
