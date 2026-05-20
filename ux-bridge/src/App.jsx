@@ -189,7 +189,6 @@ function DynamicProjectPage() {
       () => import("../vibe-drawer.js"),
       () => import("../comments-panel.js"),
       () => import("../dev-mode-drawer.js"),
-      () => import("../layer-visibility-controls.js"),
       () => import("../customizer.js"),
     ],
     [],

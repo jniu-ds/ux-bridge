@@ -20,6 +20,7 @@
     editorValue: "",
     renderedMode: "",
     renderedBreakpointMode: null,
+    hoveredHtmlLine: -1,
   };
 
   const style = document.createElement("style");
@@ -32,6 +33,8 @@
     }
 
     .preview-dev-panel {
+      --preview-dev-editor-padding-top: 14px;
+      --preview-dev-editor-line-height: 18.6px;
       position: fixed;
       top: 0;
       right: 0;
@@ -183,7 +186,7 @@
       margin: 0;
       border: 0;
       border-radius: 0;
-      padding: 14px 16px;
+      padding: var(--preview-dev-editor-padding-top) 16px 14px 42px;
       overflow: auto;
       font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       tab-size: 2;
@@ -192,6 +195,7 @@
     }
 
     .preview-dev-panel__code {
+      z-index: 1;
       pointer-events: none;
       color: #dbeafe;
       background: transparent;
@@ -235,12 +239,72 @@
     }
 
     .preview-dev-panel__editor {
+      z-index: 2;
       resize: none;
       color: transparent;
       caret-color: #f8fafc;
       background: transparent;
       outline: none;
       -webkit-text-fill-color: transparent;
+    }
+
+    .preview-dev-panel__layer-gutter {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: 0;
+      z-index: 3;
+      width: 36px;
+      overflow: hidden;
+      pointer-events: none;
+    }
+
+    .preview-dev-panel__layer-toggle {
+      position: absolute;
+      left: 8px;
+      display: grid;
+      width: 22px;
+      height: 22px;
+      place-items: center;
+      border: 0;
+      border-radius: 999px;
+      color: #94a3b8;
+      background: transparent;
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(-2px);
+      transition: opacity 0.12s ease, color 0.12s ease, background 0.12s ease;
+    }
+
+    .preview-dev-panel__layer-toggle.is-visible {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .preview-dev-panel__layer-toggle.is-hidden {
+      color: #c084fc;
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .preview-dev-panel__layer-toggle:hover {
+      color: #f8fafc;
+      background: rgba(148, 163, 184, 0.16);
+    }
+
+    .preview-dev-panel__layer-toggle.is-hidden:hover {
+      color: #f3e8ff;
+      background: rgba(164, 41, 236, 0.2);
+    }
+
+    .preview-dev-panel__layer-toggle svg {
+      width: 15px;
+      height: 15px;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
     }
 
     .preview-dev-panel.is-breakpoint-active .preview-dev-panel__editor {
@@ -624,6 +688,8 @@
       code.scrollTop = editor.scrollTop;
       code.scrollLeft = editor.scrollLeft;
     }
+
+    syncHtmlLayerGutter();
   }
 
   function syncHighlightText() {
@@ -632,6 +698,241 @@
     if (code) {
       code.innerHTML = `${highlightCode(state.editorValue, state.mode)}\n`;
     }
+
+    syncHtmlLayerGutter();
+  }
+
+  function getEditorMetric(editor, property, fallback) {
+    const value = Number.parseFloat(window.getComputedStyle(editor).getPropertyValue(property));
+    return Number.isFinite(value) && value > 0 ? value : fallback;
+  }
+
+  function getHtmlLayerRows(value = state.editorValue) {
+    if (state.mode !== "html") {
+      return [];
+    }
+
+    return String(value || "")
+      .split("\n")
+      .map((line, index) => {
+        const match = line.match(/^\s*<(?!\/|!)([A-Za-z][\w:-]*)(?:\s|>|\/)/);
+
+        if (!match) {
+          return null;
+        }
+
+        return {
+          line: index,
+          hidden: isHtmlLayerHidden(line),
+        };
+      })
+      .filter(Boolean);
+  }
+
+  function isHtmlLayerHidden(line) {
+    return (
+      /\sdata-ux-layer-hidden-control=(["'])true\1/i.test(line) ||
+      /\sdata-ux-layer-visible=(["'])false\1/i.test(line) ||
+      /\saria-hidden=(["'])true\1/i.test(line) ||
+      /style=(["'])[^"']*visibility\s*:\s*hidden/i.test(line)
+    );
+  }
+
+  function iconMarkup(hidden) {
+    return hidden
+      ? `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 2l20 20"></path><path d="M10.6 10.6a2 2 0 0 0 2.8 2.8"></path><path d="M9.9 4.2A10.4 10.4 0 0 1 12 4c5 0 9 5 10 8a15.6 15.6 0 0 1-2.1 3.6"></path><path d="M6.5 6.5C4.4 7.9 2.8 10 2 12c1 3 5 8 10 8a10.7 10.7 0 0 0 5.5-1.6"></path></svg>`
+      : `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z"></path><circle cx="12" cy="12" r="3"></circle></svg>`;
+  }
+
+  function syncHtmlLayerGutter() {
+    const gutter = panel.querySelector("[data-preview-dev-layer-gutter]");
+    const editor = panel.querySelector("[data-preview-dev-editor]");
+
+    if (!(gutter instanceof HTMLElement) || !(editor instanceof HTMLTextAreaElement) || state.mode !== "html") {
+      if (gutter instanceof HTMLElement) {
+        gutter.innerHTML = "";
+      }
+
+      return;
+    }
+
+    const rows = getHtmlLayerRows();
+    const visibleRows = rows.filter((row) => row.hidden || row.line === state.hoveredHtmlLine);
+    const paddingTop = getEditorMetric(editor, "padding-top", 14);
+    const lineHeight = getEditorMetric(editor, "line-height", 18.6);
+    const scrollTop = editor.scrollTop || 0;
+
+    gutter.innerHTML = visibleRows
+      .map((row) => {
+        const top = paddingTop + row.line * lineHeight - scrollTop;
+        const visibleClass = row.line === state.hoveredHtmlLine || row.hidden ? " is-visible" : "";
+        const hiddenClass = row.hidden ? " is-hidden" : "";
+        const label = row.hidden ? "Unhide HTML layer" : "Hide HTML layer";
+
+        return `
+          <button
+            type="button"
+            class="preview-dev-panel__layer-toggle${visibleClass}${hiddenClass}"
+            style="top: ${top}px;"
+            data-preview-dev-layer-toggle
+            data-preview-dev-line="${row.line}"
+            aria-label="${label}"
+            title="${label}"
+          >
+            ${iconMarkup(row.hidden)}
+          </button>
+        `;
+      })
+      .join("");
+  }
+
+  function setStatus(message, isError = false) {
+    state.status = isError ? "" : message;
+    state.error = isError ? message : "";
+    const status = panel.querySelector("[data-preview-dev-status]");
+
+    if (status) {
+      status.textContent = message;
+      status.classList.toggle("is-error", isError);
+    }
+  }
+
+  function escapeRegExp(value) {
+    return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+
+  function escapeAttribute(value) {
+    return String(value).replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+  }
+
+  function setAttributeOnTag(tag, name, value) {
+    const pattern = new RegExp(`\\s${escapeRegExp(name)}(?:=(?:"[^"]*"|'[^']*'|[^\\s>]+))?`, "i");
+    const replacement = ` ${name}="${escapeAttribute(value)}"`;
+
+    if (pattern.test(tag)) {
+      return tag.replace(pattern, replacement);
+    }
+
+    return tag.replace(/\s*(\/?>)$/, `${replacement}$1`);
+  }
+
+  function removeAttributeFromTag(tag, name) {
+    const pattern = new RegExp(`\\s${escapeRegExp(name)}(?:=(?:"[^"]*"|'[^']*'|[^\\s>]+))?`, "ig");
+    return tag.replace(pattern, "");
+  }
+
+  function getStyleAttribute(tag) {
+    const match = tag.match(/\sstyle=(["'])([\s\S]*?)\1/i);
+    return match ? { quote: match[1], value: match[2] } : null;
+  }
+
+  function updateStyleAttribute(tag, updates) {
+    const existing = getStyleAttribute(tag);
+    const styles = new Map();
+
+    if (existing) {
+      existing.value
+        .split(";")
+        .map((item) => item.trim())
+        .filter(Boolean)
+        .forEach((item) => {
+          const colon = item.indexOf(":");
+
+          if (colon < 0) {
+            return;
+          }
+
+          const property = item.slice(0, colon).trim().toLowerCase();
+          const value = item.slice(colon + 1).trim();
+
+          if (property) {
+            styles.set(property, value);
+          }
+        });
+    }
+
+    Object.entries(updates).forEach(([property, value]) => {
+      const key = property.toLowerCase();
+
+      if (value == null) {
+        styles.delete(key);
+      } else {
+        styles.set(key, value);
+      }
+    });
+
+    const styleValue = Array.from(styles.entries())
+      .map(([property, value]) => `${property}: ${value}`)
+      .join("; ");
+
+    if (!styleValue) {
+      return removeAttributeFromTag(tag, "style");
+    }
+
+    return setAttributeOnTag(tag, "style", `${styleValue};`);
+  }
+
+  function updateHtmlLayerLine(line, hidden) {
+    const match = line.match(/^(\s*)(<[^>]+>)([\s\S]*)$/);
+
+    if (!match) {
+      return line;
+    }
+
+    let tag = match[2];
+
+    if (hidden) {
+      tag = setAttributeOnTag(tag, "data-ux-layer-hidden-control", "true");
+      tag = setAttributeOnTag(tag, "data-ux-layer-visible", "false");
+      tag = setAttributeOnTag(tag, "aria-hidden", "true");
+      tag = updateStyleAttribute(tag, {
+        visibility: "hidden",
+        "pointer-events": "none",
+      });
+    } else {
+      tag = removeAttributeFromTag(tag, "data-ux-layer-hidden-control");
+      tag = removeAttributeFromTag(tag, "data-ux-layer-visible");
+      tag = removeAttributeFromTag(tag, "aria-hidden");
+      tag = updateStyleAttribute(tag, {
+        visibility: null,
+        "pointer-events": null,
+      });
+    }
+
+    return `${match[1]}${tag}${match[3]}`;
+  }
+
+  function toggleHtmlLayerVisibility(lineIndex) {
+    if (state.mode !== "html" || !Number.isInteger(lineIndex) || lineIndex < 0) {
+      return;
+    }
+
+    const editor = panel.querySelector("[data-preview-dev-editor]");
+    const lines = String(state.editorValue || "").split("\n");
+
+    if (!lines[lineIndex]) {
+      return;
+    }
+
+    const nextHidden = !isHtmlLayerHidden(lines[lineIndex]);
+    lines[lineIndex] = updateHtmlLayerLine(lines[lineIndex], nextHidden);
+    state.editorValue = lines.join("\n");
+    state.dirty = true;
+    state.error = "";
+    state.status = "Unsaved changes";
+
+    if (editor instanceof HTMLTextAreaElement) {
+      const scrollTop = editor.scrollTop;
+      const scrollLeft = editor.scrollLeft;
+      editor.value = state.editorValue;
+      editor.scrollTop = scrollTop;
+      editor.scrollLeft = scrollLeft;
+      editor.focus();
+    }
+
+    syncHighlightText();
+    syncHighlightScroll();
+    setStatus("Unsaved changes");
   }
 
   function render() {
@@ -669,7 +970,8 @@
             .join("")}
         </nav>
       </header>
-      <div class="preview-dev-panel__body">
+      <div class="preview-dev-panel__body" data-preview-dev-body>
+        <div class="preview-dev-panel__layer-gutter" data-preview-dev-layer-gutter></div>
         <pre class="preview-dev-panel__code" data-preview-dev-code aria-hidden="true"><code>${highlightCode(state.editorValue, state.mode)}\n</code></pre>
         <textarea class="preview-dev-panel__editor" data-preview-dev-editor spellcheck="false" aria-label="${escapeHtml(state.mode)} editor">${escapeHtml(state.editorValue)}</textarea>
       </div>
@@ -688,6 +990,7 @@
 
     syncToggleState();
     syncLayout();
+    syncHtmlLayerGutter();
   }
 
   function syncToggleState() {
@@ -721,6 +1024,15 @@
     if (closeButton) {
       event.preventDefault();
       setOpen(false);
+      return;
+    }
+
+    const layerToggle = target.closest("[data-preview-dev-layer-toggle]");
+
+    if (layerToggle) {
+      event.preventDefault();
+      const line = Number.parseInt(String(layerToggle.getAttribute("data-preview-dev-line") || ""), 10);
+      toggleHtmlLayerVisibility(line);
       return;
     }
 
@@ -787,6 +1099,49 @@
       syncHighlightScroll();
     }
   }, true);
+
+  panel.addEventListener("pointermove", (event) => {
+    if (state.mode !== "html") {
+      return;
+    }
+
+    const target = event.target;
+
+    if (!(target instanceof Element) || !target.closest("[data-preview-dev-body]")) {
+      return;
+    }
+
+    const editor = panel.querySelector("[data-preview-dev-editor]");
+
+    if (!(editor instanceof HTMLTextAreaElement)) {
+      return;
+    }
+
+    const rect = editor.getBoundingClientRect();
+    const lineHeight = getEditorMetric(editor, "line-height", 18.6);
+    const paddingTop = getEditorMetric(editor, "padding-top", 14);
+    const nextLine = Math.max(0, Math.floor((event.clientY - rect.top + editor.scrollTop - paddingTop) / lineHeight));
+    const rows = getHtmlLayerRows();
+    const hoverLine = rows.some((row) => row.line === nextLine) ? nextLine : -1;
+
+    if (hoverLine !== state.hoveredHtmlLine) {
+      state.hoveredHtmlLine = hoverLine;
+      syncHtmlLayerGutter();
+    }
+  });
+
+  panel.addEventListener("pointerleave", (event) => {
+    const nextTarget = event.relatedTarget;
+
+    if (nextTarget instanceof Node && panel.contains(nextTarget)) {
+      return;
+    }
+
+    if (state.hoveredHtmlLine !== -1) {
+      state.hoveredHtmlLine = -1;
+      syncHtmlLayerGutter();
+    }
+  });
 
   panel.addEventListener("keydown", (event) => {
     const target = event.target;
