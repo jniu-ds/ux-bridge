@@ -3,6 +3,9 @@ export interface PageFileMetadata {
   rootPath: string;
   configPath: string;
   previewPath: string;
+  htmlPath: string;
+  cssPath: string;
+  breakpointOverridesPath: string;
   scriptPath: string;
   componentPath: string;
   promptPath: string;

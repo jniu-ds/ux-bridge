@@ -67,6 +67,9 @@ export function buildPageFileMetadata(projectId, page) {
     rootPath: pageRoot,
     configPath: join(pageRoot, "page.config.json"),
     previewPath: join(pageRoot, "page.preview.json"),
+    htmlPath: join(pageRoot, "page.preview.html"),
+    cssPath: join(pageRoot, "page.preview.css"),
+    breakpointOverridesPath: join(pageRoot, "page.preview.breakpointOverrides"),
     scriptPath: join(pageRoot, "page.preview.js"),
     componentPath: join(pageRoot, "page.tsx"),
     promptPath: join(pageRoot, "page.prompt.md"),
@@ -141,6 +144,7 @@ Guidance:
 - Generate front-end UI only
 - Do not create routing, backend services, auth, or a nested application shell
 - Keep output focused on the mobile preview viewport
+- Use page.preview.html for markup, page.preview.css for styles, and page.preview.breakpointOverrides for responsive overrides
 - Use page.preview.js for scoped interactions when the UI needs richer behavior
 `;
 }
@@ -438,6 +442,9 @@ async function writeProjectManifests(project) {
       name: page.name,
       fileSlug: page.fileSlug,
       previewPath: page.files?.previewPath || "",
+      htmlPath: page.files?.htmlPath || "",
+      cssPath: page.files?.cssPath || "",
+      breakpointOverridesPath: page.files?.breakpointOverridesPath || "",
       scriptPath: page.files?.scriptPath || "",
       componentPath: page.files?.componentPath || "",
       promptPath: page.files?.promptPath || "",
@@ -462,6 +469,9 @@ export async function scaffoldPageFiles(project, page, options = {}) {
   await writeJsonFile(files.configPath, buildPageConfig(project, pageWithFiles));
   const preview = buildPagePreview(pageWithFiles);
   await writeJsonFile(files.previewPath, preview || null);
+  await writeFile(files.htmlPath, String(preview?.html || ""), "utf8");
+  await writeFile(files.cssPath, String(preview?.css || ""), "utf8");
+  await writeJsonFile(files.breakpointOverridesPath, preview?.breakpointOverrides || {});
   await writeFile(files.scriptPath, String(preview?.js || ""), "utf8");
   const overwrite = options.overwrite === true;
 
@@ -554,11 +564,22 @@ export async function hydrateProjectPreviewFiles(project) {
   for (const page of Array.isArray(project.pages) ? project.pages : []) {
     const files = page.files || buildPageFileMetadata(project.id, page);
     const rawPreview = await readJsonFile(files.previewPath, null);
+    const previewHtml = await readTextFile(files.htmlPath, null);
+    const previewCss = await readTextFile(files.cssPath, null);
+    const previewBreakpointOverrides =
+      (await readJsonFile(files.breakpointOverridesPath, null)) ??
+      (await readJsonFile(`${files.breakpointOverridesPath}.json`, null));
     const previewScript = await readTextFile(files.scriptPath, null);
     const previewInput = rawPreview && typeof rawPreview === "object" ? /** @type {Record<string, unknown>} */ (rawPreview) : null;
     const preview = normalizePagePreview(
       previewInput
-        ? { ...previewInput, js: previewScript !== null ? previewScript : previewInput.js }
+        ? {
+            ...previewInput,
+            html: previewHtml !== null ? previewHtml : previewInput.html,
+            css: previewCss !== null ? previewCss : previewInput.css,
+            breakpointOverrides: previewBreakpointOverrides !== null ? previewBreakpointOverrides : previewInput.breakpointOverrides,
+            js: previewScript !== null ? previewScript : previewInput.js,
+          }
         : rawPreview,
     );
     nextPages.push({
