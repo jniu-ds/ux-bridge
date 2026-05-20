@@ -18,6 +18,8 @@
     error: "",
     status: "",
     editorValue: "",
+    renderedMode: "",
+    renderedBreakpointMode: null,
   };
 
   const style = document.createElement("style");
@@ -37,14 +39,14 @@
       z-index: 1315;
       display: grid;
       grid-template-rows: auto minmax(0, 1fr) auto;
-      width: 300px;
-      max-width: min(300px, calc(100vw - 96px));
+      width: var(--preview-dev-panel-width, 300px);
+      max-width: var(--preview-dev-panel-width, 300px);
       box-sizing: border-box;
-      overflow: auto;
+      overflow: hidden;
       pointer-events: none;
       opacity: 0;
-      transform: translateX(12px);
-      transition: opacity 0.18s ease, transform 0.24s cubic-bezier(.22,1,.36,1);
+      transform: translateX(8px);
+      transition: opacity 0.18s ease, right 0.24s cubic-bezier(.22,1,.36,1), transform 0.24s cubic-bezier(.22,1,.36,1);
       border-left: 1px solid rgba(37, 37, 37, 0.14);
       border-right: 1px solid rgba(37, 37, 37, 0.08);
       background: rgba(255, 255, 255, 0.94);
@@ -163,31 +165,78 @@
 
     .preview-dev-panel__body {
       min-height: 0;
-      padding: 12px 16px;
-      display: grid;
+      position: relative;
+      overflow: hidden;
+      display: block;
+      background: rgba(255, 255, 255, 0.72);
+    }
+
+    .preview-dev-panel__code,
+    .preview-dev-panel__editor {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      min-width: 0;
+      min-height: 100%;
+      box-sizing: border-box;
+      margin: 0;
+      border: 0;
+      border-radius: 0;
+      padding: 14px 16px;
+      overflow: auto;
+      font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      tab-size: 2;
+      white-space: pre;
+      overflow-wrap: normal;
+    }
+
+    .preview-dev-panel__code {
+      pointer-events: none;
+      color: #111827;
+      background: transparent;
+    }
+
+    .preview-dev-panel__code code {
+      font: inherit;
+    }
+
+    .preview-dev-panel__token--tag,
+    .preview-dev-panel__token--keyword {
+      color: #2563eb;
+      font-weight: 700;
+    }
+
+    .preview-dev-panel__token--attr,
+    .preview-dev-panel__token--property {
+      color: #7c3aed;
+    }
+
+    .preview-dev-panel__token--string,
+    .preview-dev-panel__token--value {
+      color: #059669;
+    }
+
+    .preview-dev-panel__token--number {
+      color: #c2410c;
+    }
+
+    .preview-dev-panel__token--comment {
+      color: #94a3b8;
+      font-style: italic;
     }
 
     .preview-dev-panel__editor {
-      width: 100%;
-      min-width: 0;
-      min-height: 420px;
-      height: 100%;
-      box-sizing: border-box;
       resize: none;
-      border: 1px solid rgba(37, 37, 37, 0.12);
-      border-radius: 14px;
-      padding: 12px;
-      color: #111827;
-      background: rgba(255, 255, 255, 0.86);
-      font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      tab-size: 2;
+      color: transparent;
+      caret-color: #111827;
+      background: transparent;
       outline: none;
+      -webkit-text-fill-color: transparent;
     }
 
     .preview-dev-panel.is-breakpoint-active .preview-dev-panel__editor {
-      color: #6f13a3;
-      background: rgba(255, 255, 255, 0.72);
-      border-color: rgba(164, 41, 236, 0.24);
+      caret-color: #6f13a3;
     }
 
     .preview-dev-panel__footer {
@@ -251,6 +300,32 @@
       background: #a429ec1a !important;
       border-color: #a429ec36 !important;
     }
+
+    body.preview-dev-open.preview-viewport-responsive {
+      --bridge-side-actions-offset: var(--preview-dev-panel-width, 300px) !important;
+      --bridge-side-actions-reserved: calc(var(--bridge-side-actions-width, 88px) + var(--preview-dev-panel-width, 300px)) !important;
+      --bridge-responsive-right-inset: var(--bridge-side-actions-reserved) !important;
+    }
+
+    body.preview-dev-open.preview-viewport-responsive.customizer-open {
+      --bridge-responsive-right-inset: calc(var(--bridge-side-actions-reserved) + var(--customizer-drawer-width)) !important;
+    }
+
+    body.preview-dev-open.preview-viewport-responsive.comments-open {
+      --bridge-responsive-right-inset: calc(var(--bridge-side-actions-reserved) + var(--comments-drawer-width)) !important;
+    }
+
+    body.preview-dev-open.preview-viewport-responsive.uploads-open {
+      --bridge-responsive-right-inset: calc(var(--bridge-side-actions-reserved) + var(--uploads-drawer-width)) !important;
+    }
+
+    body.preview-dev-open.preview-viewport-responsive.vibe-open {
+      --bridge-responsive-right-inset: calc(var(--bridge-side-actions-reserved) + var(--vibe-drawer-width)) !important;
+    }
+
+    body.preview-dev-open.preview-viewport-responsive.inspector-open {
+      --bridge-responsive-right-inset: calc(var(--bridge-side-actions-reserved) + var(--inspector-drawer-width)) !important;
+    }
   `;
   document.head.append(style);
 
@@ -267,6 +342,111 @@
       .replaceAll(">", "&gt;")
       .replaceAll('"', "&quot;")
       .replaceAll("'", "&#39;");
+  }
+
+  function tokenizePattern(value, pattern, classify) {
+    const source = String(value || "");
+    let output = "";
+    let cursor = 0;
+
+    source.replace(pattern, (match, ...args) => {
+      const offset = args[args.length - 2];
+      output += escapeHtml(source.slice(cursor, offset));
+      output += classify(match, ...args);
+      cursor = offset + match.length;
+      return match;
+    });
+
+    return output + escapeHtml(source.slice(cursor));
+  }
+
+  function highlightHtml(value) {
+    return tokenizePattern(
+      value,
+      /<!--[\s\S]*?-->|<\/?[A-Za-z][^>\s/]*(?:\s+[^\s=/>]+(?:=(?:"[^"]*"|'[^']*'|[^\s>]+))?)*\s*\/?>/g,
+      (match) => {
+        if (match.startsWith("<!--")) {
+          return `<span class="preview-dev-panel__token--comment">${escapeHtml(match)}</span>`;
+        }
+
+        return escapeHtml(match)
+          .replace(/^(&lt;\/?)([A-Za-z][\w:-]*)/, `$1<span class="preview-dev-panel__token--tag">$2</span>`)
+          .replace(/([A-Za-z_:][\w:.-]*)(=)(&quot;.*?&quot;|&#39;.*?&#39;|[^\s&]+)?/g, `<span class="preview-dev-panel__token--attr">$1</span>$2<span class="preview-dev-panel__token--string">$3</span>`);
+      },
+    );
+  }
+
+  function highlightCss(value) {
+    return tokenizePattern(
+      value,
+      /\/\*[\s\S]*?\*\/|#[0-9a-fA-F]{3,8}\b|(?:^|[;{\s])(--?[\w-]+)(?=\s*:)|\b-?\d*\.?\d+(?:px|rem|em|%|vh|vw|ms|s)?\b|"[^"]*"|'[^']*'/g,
+      (match) => {
+        if (match.startsWith("/*")) {
+          return `<span class="preview-dev-panel__token--comment">${escapeHtml(match)}</span>`;
+        }
+        if (/^["']/.test(match)) {
+          return `<span class="preview-dev-panel__token--string">${escapeHtml(match)}</span>`;
+        }
+        if (/#[0-9a-fA-F]/.test(match)) {
+          return `<span class="preview-dev-panel__token--value">${escapeHtml(match)}</span>`;
+        }
+        if (/\d/.test(match.trim()[0] || "")) {
+          return `<span class="preview-dev-panel__token--number">${escapeHtml(match)}</span>`;
+        }
+        return escapeHtml(match).replace(/(--?[\w-]+)/, `<span class="preview-dev-panel__token--property">$1</span>`);
+      },
+    );
+  }
+
+  function highlightJs(value) {
+    return tokenizePattern(
+      value,
+      /\/\/.*|\/\*[\s\S]*?\*\/|`(?:\\[\s\S]|[^`])*`|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\b(?:const|let|var|function|return|if|else|for|while|await|async|try|catch|new|class|import|export|from|true|false|null|undefined)\b|\b-?\d*\.?\d+\b/g,
+      (match) => {
+        if (match.startsWith("//") || match.startsWith("/*")) {
+          return `<span class="preview-dev-panel__token--comment">${escapeHtml(match)}</span>`;
+        }
+        if (/^[`"']/.test(match)) {
+          return `<span class="preview-dev-panel__token--string">${escapeHtml(match)}</span>`;
+        }
+        if (/^-?\d/.test(match)) {
+          return `<span class="preview-dev-panel__token--number">${escapeHtml(match)}</span>`;
+        }
+        return `<span class="preview-dev-panel__token--keyword">${escapeHtml(match)}</span>`;
+      },
+    );
+  }
+
+  function highlightJson(value) {
+    return tokenizePattern(
+      value,
+      /"(?:\\.|[^"\\])*"(?=\s*:)|"(?:\\.|[^"\\])*"|[-]?\b\d*\.?\d+\b|\b(?:true|false|null)\b/g,
+      (match) => {
+        if (match.endsWith('"') && /"\s*$/.test(match)) {
+          return `<span class="preview-dev-panel__token--string">${escapeHtml(match)}</span>`;
+        }
+        if (/^-?\d/.test(match)) {
+          return `<span class="preview-dev-panel__token--number">${escapeHtml(match)}</span>`;
+        }
+        if (/^(true|false|null)$/.test(match)) {
+          return `<span class="preview-dev-panel__token--keyword">${escapeHtml(match)}</span>`;
+        }
+        return `<span class="preview-dev-panel__token--property">${escapeHtml(match)}</span>`;
+      },
+    );
+  }
+
+  function highlightCode(value, mode = state.mode) {
+    if (mode === "css") {
+      return highlightCss(value);
+    }
+    if (mode === "js") {
+      return highlightJs(value);
+    }
+    if (mode === "overrides") {
+      return highlightJson(value);
+    }
+    return highlightHtml(value);
   }
 
   function getPreview() {
@@ -353,19 +533,27 @@
   }
 
   function syncLayout() {
-    const rail = document.querySelector(".bridge-project-side-actions");
     const drawerWidth = getActiveDrawerWidth();
-    const panelWidth = state.open ? Math.min(300, Math.max(0, window.innerWidth - 96)) : 0;
 
     panel.style.right = `${drawerWidth}px`;
     document.body.classList.toggle("preview-dev-open", state.open);
+  }
 
-    if (rail instanceof HTMLElement) {
-      if (state.open) {
-        rail.style.right = `${drawerWidth + panelWidth}px`;
-      } else {
-        rail.style.removeProperty("right");
-      }
+  function syncHighlightScroll() {
+    const editor = panel.querySelector("[data-preview-dev-editor]");
+    const code = panel.querySelector("[data-preview-dev-code]");
+
+    if (editor instanceof HTMLTextAreaElement && code instanceof HTMLElement) {
+      code.scrollTop = editor.scrollTop;
+      code.scrollLeft = editor.scrollLeft;
+    }
+  }
+
+  function syncHighlightText() {
+    const code = panel.querySelector("[data-preview-dev-code]");
+
+    if (code) {
+      code.innerHTML = `${highlightCode(state.editorValue, state.mode)}\n`;
     }
   }
 
@@ -373,6 +561,8 @@
     syncModeToBreakpointState({ preserveDirty: true });
     const tabs = getModeTabs();
     const breakpointMode = getBreakpointMode();
+    state.renderedMode = state.mode;
+    state.renderedBreakpointMode = breakpointMode;
     panel.classList.toggle("is-breakpoint-active", breakpointMode);
     panel.style.setProperty("--preview-dev-tab-count", String(Math.max(1, tabs.length)));
 
@@ -403,6 +593,7 @@
         </nav>
       </header>
       <div class="preview-dev-panel__body">
+        <pre class="preview-dev-panel__code" data-preview-dev-code aria-hidden="true"><code>${highlightCode(state.editorValue, state.mode)}\n</code></pre>
         <textarea class="preview-dev-panel__editor" data-preview-dev-editor spellcheck="false" aria-label="${escapeHtml(state.mode)} editor">${escapeHtml(state.editorValue)}</textarea>
       </div>
       <footer class="preview-dev-panel__footer">
@@ -417,59 +608,6 @@
         </div>
       </footer>
     `;
-
-    panel.querySelector("[data-preview-dev-close]")?.addEventListener("click", () => setOpen(false));
-    panel.querySelectorAll("[data-preview-dev-tab]").forEach((button) => {
-      button.addEventListener("click", () => {
-        const nextMode = String(button.getAttribute("data-preview-dev-tab") || "").trim();
-
-        if (!nextMode || nextMode === state.mode) {
-          return;
-        }
-
-        state.mode = nextMode;
-        state.editorValue = getContentForMode(nextMode);
-        state.dirty = false;
-        state.error = "";
-        state.status = "";
-        render();
-      });
-    });
-
-    const editor = panel.querySelector("[data-preview-dev-editor]");
-
-    if (editor instanceof HTMLTextAreaElement) {
-      editor.addEventListener("input", () => {
-        state.editorValue = editor.value;
-        state.dirty = true;
-        state.status = "";
-        state.error = "";
-        const status = panel.querySelector("[data-preview-dev-status]");
-
-        if (status) {
-          status.textContent = "Unsaved changes";
-          status.classList.remove("is-error");
-        }
-      });
-
-      editor.addEventListener("keydown", (event) => {
-        if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
-          event.preventDefault();
-          void save();
-        }
-      });
-    }
-
-    panel.querySelector("[data-preview-dev-revert]")?.addEventListener("click", () => {
-      state.editorValue = getContentForMode(state.mode);
-      state.dirty = false;
-      state.error = "";
-      state.status = "Reverted";
-      render();
-    });
-    panel.querySelector("[data-preview-dev-save]")?.addEventListener("click", () => {
-      void save();
-    });
 
     syncToggleState();
     syncLayout();
@@ -493,6 +631,109 @@
 
     render();
   }
+
+  panel.addEventListener("click", (event) => {
+    const target = event.target;
+
+    if (!(target instanceof Element)) {
+      return;
+    }
+
+    const closeButton = target.closest("[data-preview-dev-close]");
+
+    if (closeButton) {
+      event.preventDefault();
+      setOpen(false);
+      return;
+    }
+
+    const tabButton = target.closest("[data-preview-dev-tab]");
+
+    if (tabButton) {
+      event.preventDefault();
+      const nextMode = String(tabButton.getAttribute("data-preview-dev-tab") || "").trim();
+
+      if (!nextMode || nextMode === state.mode) {
+        return;
+      }
+
+      state.mode = nextMode;
+      state.editorValue = getContentForMode(nextMode);
+      state.dirty = false;
+      state.error = "";
+      state.status = "";
+      render();
+      return;
+    }
+
+    if (target.closest("[data-preview-dev-revert]")) {
+      event.preventDefault();
+      state.editorValue = getContentForMode(state.mode);
+      state.dirty = false;
+      state.error = "";
+      state.status = "Reverted";
+      render();
+      return;
+    }
+
+    if (target.closest("[data-preview-dev-save]")) {
+      event.preventDefault();
+      void save();
+    }
+  });
+
+  panel.addEventListener("input", (event) => {
+    const target = event.target;
+
+    if (!(target instanceof HTMLTextAreaElement) || !target.matches("[data-preview-dev-editor]")) {
+      return;
+    }
+
+    state.editorValue = target.value;
+    state.dirty = true;
+    state.status = "";
+    state.error = "";
+    syncHighlightText();
+
+    const status = panel.querySelector("[data-preview-dev-status]");
+
+    if (status) {
+      status.textContent = "Unsaved changes";
+      status.classList.remove("is-error");
+    }
+  });
+
+  panel.addEventListener("scroll", (event) => {
+    const target = event.target;
+
+    if (target instanceof HTMLTextAreaElement && target.matches("[data-preview-dev-editor]")) {
+      syncHighlightScroll();
+    }
+  }, true);
+
+  panel.addEventListener("keydown", (event) => {
+    const target = event.target;
+
+    if (!(target instanceof HTMLTextAreaElement) || !target.matches("[data-preview-dev-editor]")) {
+      return;
+    }
+
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
+      event.preventDefault();
+      void save();
+      return;
+    }
+
+    if (event.key === "Tab") {
+      event.preventDefault();
+      const start = target.selectionStart || 0;
+      const end = target.selectionEnd || 0;
+      const nextValue = `${target.value.slice(0, start)}  ${target.value.slice(end)}`;
+      target.value = nextValue;
+      target.selectionStart = target.selectionEnd = start + 2;
+      target.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+  });
 
   function getSavePayload() {
     const preview = getPreview();
@@ -659,13 +900,21 @@
   });
 
   const mutationObserver = new MutationObserver(() => {
+    const nextBreakpointMode = getBreakpointMode();
+
     if (!state.open) {
       syncToggleState();
+      state.renderedBreakpointMode = nextBreakpointMode;
       return;
     }
 
-    syncModeToBreakpointState({ preserveDirty: true });
-    render();
+    if (state.renderedBreakpointMode !== nextBreakpointMode) {
+      syncModeToBreakpointState({ preserveDirty: true });
+      render();
+      return;
+    }
+
+    syncLayout();
   });
 
   mutationObserver.observe(document.body, { attributes: true, attributeFilter: ["class"] });
