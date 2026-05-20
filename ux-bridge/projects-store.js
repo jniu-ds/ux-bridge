@@ -36,6 +36,7 @@ import {
   buildPagePreview,
   hydrateProjectPreviewFiles,
   normalizePagePreview,
+  normalizePreviewBreakpointOverrides,
   scaffoldProjectWorkspace,
   syncProjectWorkspaceMetadata,
 } from "./project-files.js";
@@ -495,9 +496,11 @@ function normalizeVibeDraft(draft) {
     summary: String(draft.summary || "").trim(),
     html: String(draft.html || "").trim(),
     css: String(draft.css || "").trim(),
+    stageStyle: String(draft.stageStyle || "").trim(),
     generatedAt: Number(draft.generatedAt) || 0,
     assets: Array.isArray(draft.assets) ? draft.assets : [],
     credentialMode: String(draft.credentialMode || "user-session").trim().toLowerCase() || "user-session",
+    breakpointOverrides: normalizePreviewBreakpointOverrides(draft.breakpointOverrides),
   };
 }
 
@@ -2301,6 +2304,96 @@ export async function handleProjectsRequest(req) {
       viewportPreset,
     };
     project.updatedAt = Date.now();
+    const persistedProject = await persistProject(project, { syncWorkspace: true });
+
+    return {
+      status: 200,
+      payload: {
+        ok: true,
+        project: await buildProjectPayload(persistedProject, await buildOwnerDirectory(), user, origin),
+      },
+    };
+  }
+
+  if (action === "savePreviewContentEdits") {
+    const projectId = normalizeProjectId(payload.project);
+    const pageId = normalizePageId(payload.page);
+
+    if (!projectId || !pageId) {
+      return {
+        status: 400,
+        payload: { ok: false, error: "Choose a valid project page." },
+      };
+    }
+
+    const project = await readDynamicProject(projectId);
+
+    if (!project) {
+      return {
+        status: 404,
+        payload: { ok: false, error: "Project not found." },
+      };
+    }
+
+    const access = await computeProjectAccess(user, project);
+
+    if (!access.hasAccess) {
+      return {
+        status: 403,
+        payload: { ok: false, error: "You do not have access to this project." },
+      };
+    }
+
+    const page = project.pages.find((entry) => entry.id === pageId);
+
+    if (!page) {
+      return {
+        status: 404,
+        payload: { ok: false, error: "Page not found." },
+      };
+    }
+
+    const now = Date.now();
+    const syncBase = payload.syncBase !== false;
+    const currentPreview = buildPagePreview(page);
+    const fallbackHtml = String(payload.html || "").trim();
+    const fallbackCss = String(payload.css || "");
+    const fallbackStageStyle = String(payload.stageStyle || "").trim();
+    const nextPreview = normalizePagePreview({
+      ...(currentPreview || {}),
+      providerId: currentPreview?.providerId || "manual",
+      providerLabel: currentPreview?.providerLabel || "UX Bridge",
+      summary: String(payload.summary || currentPreview?.summary || "").trim(),
+      html: syncBase ? fallbackHtml : currentPreview?.html || fallbackHtml,
+      css: syncBase ? fallbackCss : currentPreview?.css || fallbackCss,
+      stageStyle: syncBase ? fallbackStageStyle : currentPreview?.stageStyle || fallbackStageStyle,
+      generatedAt: Number(currentPreview?.generatedAt) || now,
+      appliedAt: Number(currentPreview?.appliedAt) || now,
+      updatedAt: now,
+      source: "manual-edits",
+      breakpointOverrides: normalizePreviewBreakpointOverrides(payload.breakpointOverrides),
+    });
+
+    if (!nextPreview) {
+      return {
+        status: 400,
+        payload: { ok: false, error: "Unable to save an empty preview." },
+      };
+    }
+
+    page.preview = nextPreview;
+    page.hasContent = Boolean(nextPreview.html);
+    page.vibe = {
+      ...normalizeVibeState(page.vibe),
+      status: "applied",
+      appliedAt: Number(nextPreview.appliedAt) || now,
+      appliedDraft: {
+        ...normalizeVibeDraft(page.vibe?.appliedDraft),
+        ...nextPreview,
+        generatedAt: Number(nextPreview.generatedAt) || now,
+      },
+    };
+    project.updatedAt = now;
     const persistedProject = await persistProject(project, { syncWorkspace: true });
 
     return {

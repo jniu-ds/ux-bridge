@@ -199,6 +199,73 @@ function escapeTemplateLiteral(value = "") {
  * @param {unknown} preview
  * @returns {PagePreview | null}
  */
+export function normalizePreviewBreakpointOverrides(value) {
+  const input = value && typeof value === "object" ? value : {};
+  const normalized = {};
+
+  Object.entries(input).forEach(([layerPath, breakpointMap]) => {
+    const normalizedLayerPath = String(layerPath || "").trim();
+
+    if (!normalizedLayerPath || !breakpointMap || typeof breakpointMap !== "object") {
+      return;
+    }
+
+    const normalizedBreakpointMap = {};
+
+    Object.entries(breakpointMap).forEach(([breakpointId, override]) => {
+      const normalizedBreakpointId = String(breakpointId || "").trim();
+
+      if (!normalizedBreakpointId || !override || typeof override !== "object") {
+        return;
+      }
+
+      const overrideInput = /** @type {Record<string, unknown>} */ (override);
+      const styles = {};
+      const attrs = {};
+
+      if (overrideInput.styles && typeof overrideInput.styles === "object") {
+        Object.entries(overrideInput.styles).forEach(([key, rawValue]) => {
+          const normalizedKey = String(key || "").trim();
+
+          if (normalizedKey) {
+            styles[normalizedKey] = rawValue == null ? null : String(rawValue);
+          }
+        });
+      }
+
+      if (overrideInput.attrs && typeof overrideInput.attrs === "object") {
+        Object.entries(overrideInput.attrs).forEach(([key, rawValue]) => {
+          const normalizedKey = String(key || "").trim();
+
+          if (normalizedKey) {
+            attrs[normalizedKey] = rawValue == null ? null : String(rawValue);
+          }
+        });
+      }
+
+      const normalizedOverride = { styles, attrs };
+
+      if (Object.prototype.hasOwnProperty.call(overrideInput, "text")) {
+        normalizedOverride.text = String(overrideInput.text || "");
+      }
+
+      if (
+        Object.keys(styles).length ||
+        Object.keys(attrs).length ||
+        Object.prototype.hasOwnProperty.call(normalizedOverride, "text")
+      ) {
+        normalizedBreakpointMap[normalizedBreakpointId] = normalizedOverride;
+      }
+    });
+
+    if (Object.keys(normalizedBreakpointMap).length) {
+      normalized[normalizedLayerPath] = normalizedBreakpointMap;
+    }
+  });
+
+  return normalized;
+}
+
 export function normalizePagePreview(preview) {
   if (!preview || typeof preview !== "object") {
     return null;
@@ -219,10 +286,12 @@ export function normalizePagePreview(preview) {
     summary,
     html,
     css,
+    stageStyle: String(candidate.stageStyle || "").trim(),
     generatedAt: Number(candidate.generatedAt) || 0,
     appliedAt: Number(candidate.appliedAt) || 0,
     updatedAt: Number(candidate.updatedAt) || Number(candidate.appliedAt) || Number(candidate.generatedAt) || 0,
     source: String(candidate.source || "page-files").trim().toLowerCase() || "page-files",
+    breakpointOverrides: normalizePreviewBreakpointOverrides(candidate.breakpointOverrides),
   };
 }
 

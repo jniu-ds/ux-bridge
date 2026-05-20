@@ -13,10 +13,16 @@ export interface PagePreview {
   summary: string;
   html: string;
   css: string;
+  stageStyle?: string;
   generatedAt: number;
   appliedAt: number;
   updatedAt: number;
   source: string;
+  breakpointOverrides?: Record<string, Record<string, {
+    styles?: Record<string, string | null>;
+    attrs?: Record<string, string | null>;
+    text?: string;
+  }>>;
 }
 
 export interface PageRecord {
