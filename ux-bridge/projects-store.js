@@ -412,6 +412,13 @@ function normalizePageLocks(value) {
     .filter((entry) => entry.pageId && entry.lockedBy);
 }
 
+function normalizePreviewViewportPreset(value) {
+  const preset = String(value || "").trim().toLowerCase();
+  const allowedPresets = new Set(["mobile", "tablet-portrait", "tablet-landscape", "desktop", "responsive"]);
+
+  return allowedPresets.has(preset) ? preset : "mobile";
+}
+
 function normalizeProjectRecord(project) {
   if (!project || typeof project !== "object") {
     return project;
@@ -449,6 +456,10 @@ function normalizeProjectRecord(project) {
     prototypeLinks: normalizePrototypeLinks(project.prototypeLinks),
     editSessions: normalizeEditSessions(project.editSessions),
     pageLocks,
+    viewerState: {
+      ...(project.viewerState && typeof project.viewerState === "object" ? project.viewerState : {}),
+      viewportPreset: normalizePreviewViewportPreset(project.viewerState?.viewportPreset),
+    },
     designTokens: project.designTokens && typeof project.designTokens === "object" ? project.designTokens : {},
     pages: normalizedPages,
   };
@@ -1158,6 +1169,9 @@ async function buildProjectPayload(project, ownerDirectory = new Map(), user = n
     prototypeLinks: normalizePrototypeLinks(project.prototypeLinks),
     editSessions: normalizeEditSessions(project.editSessions),
     pageLocks: normalizePageLocks(project.pageLocks),
+    viewerState: {
+      viewportPreset: normalizePreviewViewportPreset(project.viewerState?.viewportPreset),
+    },
     pageCount: project.pages.length,
     pages: project.pages.map((page) => {
       const basePage = {
@@ -2249,6 +2263,51 @@ export async function handleProjectsRequest(req) {
       payload: {
         ok: true,
         project: await buildProjectPayload(project, ownerDirectory, user, origin),
+      },
+    };
+  }
+
+  if (action === "setVibeViewport") {
+    const projectId = normalizeProjectId(payload.project);
+    const viewportPreset = normalizePreviewViewportPreset(payload.viewportPreset);
+
+    if (!projectId) {
+      return {
+        status: 400,
+        payload: { ok: false, error: "Choose a valid project." },
+      };
+    }
+
+    const project = await readDynamicProject(projectId);
+
+    if (!project) {
+      return {
+        status: 404,
+        payload: { ok: false, error: "Project not found." },
+      };
+    }
+
+    const access = await computeProjectAccess(user, project);
+
+    if (!access.hasAccess) {
+      return {
+        status: 403,
+        payload: { ok: false, error: "You do not have access to this project." },
+      };
+    }
+
+    project.viewerState = {
+      ...(project.viewerState && typeof project.viewerState === "object" ? project.viewerState : {}),
+      viewportPreset,
+    };
+    project.updatedAt = Date.now();
+    const persistedProject = await persistProject(project, { syncWorkspace: true });
+
+    return {
+      status: 200,
+      payload: {
+        ok: true,
+        project: await buildProjectPayload(persistedProject, await buildOwnerDirectory(), user, origin),
       },
     };
   }
