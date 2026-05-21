@@ -979,15 +979,10 @@
   function syncHighlightScroll() {
     const editor = panel.querySelector("[data-preview-dev-editor]");
     const code = panel.querySelector("[data-preview-dev-code]");
-    const lineNumbers = panel.querySelector("[data-preview-dev-line-numbers]");
 
     if (editor instanceof HTMLTextAreaElement && code instanceof HTMLElement) {
       code.scrollTop = editor.scrollTop;
       code.scrollLeft = editor.scrollLeft;
-    }
-
-    if (editor instanceof HTMLTextAreaElement && lineNumbers instanceof HTMLElement) {
-      lineNumbers.scrollTop = editor.scrollTop;
     }
 
     syncLineNumbers();
