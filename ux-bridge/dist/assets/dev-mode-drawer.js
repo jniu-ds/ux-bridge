@@ -1781,6 +1781,53 @@
     syncHighlightScroll();
   }
 
+  function applyRuntimeOverridesChange(detail = {}) {
+    if (detail.project) {
+      applyProject(detail.project, detail.page?.id || requestedPageId);
+    } else if (state.page && detail.breakpointOverrides && typeof detail.breakpointOverrides === "object") {
+      const preview = getPreview();
+      const nextPreview = {
+        ...preview,
+        breakpointOverrides: detail.breakpointOverrides,
+      };
+
+      state.page = {
+        ...state.page,
+        preview: state.page.preview ? nextPreview : state.page.preview,
+        vibe: state.page.vibe
+          ? {
+              ...state.page.vibe,
+              appliedDraft: state.page.vibe.appliedDraft
+                ? {
+                    ...state.page.vibe.appliedDraft,
+                    breakpointOverrides: detail.breakpointOverrides,
+                  }
+                : state.page.vibe.appliedDraft,
+            }
+          : state.page.vibe,
+      };
+    }
+
+    const nextValue = getContentForMode("overrides");
+    const editor = panel.querySelector("[data-preview-dev-overrides-editor]");
+    const scrollTop = editor instanceof HTMLTextAreaElement ? editor.scrollTop : 0;
+    const scrollLeft = editor instanceof HTMLTextAreaElement ? editor.scrollLeft : 0;
+
+    state.overridesDirty = false;
+    state.overridesValue = nextValue;
+    state.error = "";
+    state.status = "";
+
+    if (editor instanceof HTMLTextAreaElement) {
+      editor.value = nextValue;
+      editor.scrollTop = scrollTop;
+      editor.scrollLeft = scrollLeft;
+    }
+
+    syncHighlightText();
+    syncHighlightScroll();
+  }
+
   function startOverridesSync() {
     if (state.overridesSyncTimer || typeof window === "undefined") {
       return;
@@ -3082,6 +3129,10 @@
       syncModeToBreakpointState({ preserveDirty: true });
       render();
     }
+  });
+
+  window.addEventListener("uxbridge:breakpoint-overrides-change", (event) => {
+    applyRuntimeOverridesChange(event.detail || {});
   });
 
   const mutationObserver = new MutationObserver(() => {
