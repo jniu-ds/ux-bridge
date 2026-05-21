@@ -1530,43 +1530,22 @@
       return [];
     }
 
-    const voidTags = new Set(["area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"]);
-    const stack = [];
-    const childIndexesByDepth = [0];
+    let ordinal = -1;
 
     return String(value || "")
       .split("\n")
       .map((line, index) => {
-        const match = line.match(/^\s*<(\/?)(?![!/])([A-Za-z][\w:-]*)(?:\s|>|\/)/);
+        const match = line.match(/^\s*<(?!\/|!)([A-Za-z][\w:-]*)(?:\s|>|\/)/);
 
         if (!match) {
           return null;
         }
 
-        const closing = match[1] === "/";
-        const tagName = String(match[2] || "").toLowerCase();
-
-        if (closing) {
-          stack.pop();
-          childIndexesByDepth.pop();
-          return null;
-        }
-
-        const depth = stack.length;
-        const siblingIndex = childIndexesByDepth[depth] || 0;
-        childIndexesByDepth[depth] = siblingIndex + 1;
-        const path = [...stack, siblingIndex].join(".");
-        const selfClosing = /\/>\s*$/.test(line) || voidTags.has(tagName);
-        const closesOnSameLine = new RegExp(`</${tagName}\\s*>\\s*$`, "i").test(line);
-
-        if (!selfClosing && !closesOnSameLine) {
-          stack.push(siblingIndex);
-          childIndexesByDepth[stack.length] = 0;
-        }
+        ordinal += 1;
 
         return {
           line: index,
-          path,
+          ordinal,
           hidden: isHtmlLayerHidden(line),
         };
       })
@@ -2199,7 +2178,7 @@
       return null;
     }
 
-    return getPreviewElementForLayerPath(row.path) || null;
+    return getPreviewLayerElements()[row.ordinal] || null;
   }
 
   function getHtmlLineForPreviewElement(element) {
@@ -2207,13 +2186,14 @@
       return -1;
     }
 
-    const path = getPreviewLayerPathForElement(element);
+    const elements = getPreviewLayerElements();
+    const index = elements.indexOf(element);
 
-    if (!path) {
+    if (index < 0) {
       return -1;
     }
 
-    return getHtmlLayerRows().find((row) => row.path === path)?.line ?? -1;
+    return getHtmlLayerRows()[index]?.line ?? -1;
   }
 
   function getPreviewRenderContainer() {
