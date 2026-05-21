@@ -1722,7 +1722,15 @@
   }
 
   function isCssFilteredViewActive() {
-    return state.mode === "css" && !state.cssShowAll && getSelectedCssLayerElements().length > 0;
+    if (state.mode !== "css" || state.cssShowAll) {
+      return false;
+    }
+
+    const fullCss = String(state.cssFullValue || getPreview().css || "");
+    const hasFilterTarget = Boolean(state.cssFilterSignature || getCssFilterSignature());
+    const isShowingFilteredContent = String(state.editorValue || "") !== fullCss;
+
+    return hasFilterTarget || isShowingFilteredContent;
   }
 
   function getCssOutputValue() {
