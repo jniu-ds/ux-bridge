@@ -3356,20 +3356,12 @@
     }, 450);
   }
 
-  function selectPreviewElementForHtmlLine(line) {
-    const element = getPreviewElementForHtmlLine(line);
-
+  function selectPreviewElement(element) {
     if (!(element instanceof Element)) {
-      return;
+      return false;
     }
 
-    state.selectedHtmlLine = line;
     state.allowCssRefilterFromSelection = true;
-    syncLineNumbers();
-    syncHtmlLayerDecorations();
-    syncOverridesLineNumbers();
-    syncOverridesLayerDecorations();
-
     const rect = element.getBoundingClientRect();
     const clientX = rect.left + Math.max(1, Math.min(rect.width / 2, rect.width - 1));
     const clientY = rect.top + Math.max(1, Math.min(rect.height / 2, rect.height - 1));
@@ -3394,6 +3386,22 @@
     element.dispatchEvent(new MouseEvent("click", { ...eventOptions, buttons: 0 }));
 
     window.requestAnimationFrame(syncPreviewLayerStateFromDom);
+    return true;
+  }
+
+  function selectPreviewElementForHtmlLine(line) {
+    const element = getPreviewElementForHtmlLine(line);
+
+    if (!(element instanceof Element)) {
+      return;
+    }
+
+    state.selectedHtmlLine = line;
+    syncLineNumbers();
+    syncHtmlLayerDecorations();
+    syncOverridesLineNumbers();
+    syncOverridesLayerDecorations();
+    selectPreviewElement(element);
   }
 
   function selectPreviewElementForEditorCaret(editor) {
@@ -3751,13 +3759,35 @@
         syncLineNumbers();
         if (state.mode === "html") {
           selectPreviewElementForEditorCaret(target);
+        } else if (state.mode === "css") {
+          const rule = getCssRuleFromPointer(event);
+          const element = getPreviewElementsForCssRule(rule)[0] || null;
+
+          if (element instanceof Element) {
+            selectPreviewElement(element);
+          }
+        } else if (state.mode === "js") {
+          const block = getJsBlockFromPointer(event);
+          const element = getPreviewElementsForJsBlock(block)[0] || null;
+
+          if (element instanceof Element) {
+            selectPreviewElement(element);
+          }
         }
       });
       return;
     }
 
     if (target instanceof HTMLTextAreaElement && target.matches("[data-preview-dev-overrides-editor]")) {
-      window.requestAnimationFrame(syncOverridesLineNumbers);
+      window.requestAnimationFrame(() => {
+        syncOverridesLineNumbers();
+        const layerPath = getOverrideLayerPathFromPointer(event);
+        const element = getPreviewElementForLayerPath(layerPath);
+
+        if (element instanceof Element) {
+          selectPreviewElement(element);
+        }
+      });
       return;
     }
 
