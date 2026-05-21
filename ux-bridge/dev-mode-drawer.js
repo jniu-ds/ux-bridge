@@ -2434,13 +2434,19 @@
   }
 
   function syncCssEditorFilterFromSelection({ force = false } = {}) {
-    if (state.mode !== "css" || state.dirty) {
+    if (state.mode !== "css") {
       return;
     }
 
-    const nextFullValue = String(getPreview().css || state.cssFullValue || "");
+    const currentSignature = state.cssFilterSignature;
     const nextSignature = getCssFilterSignature();
-    const signatureChanged = nextSignature !== state.cssFilterSignature;
+    const signatureChanged = nextSignature !== currentSignature;
+
+    if (state.dirty && !force && !signatureChanged) {
+      return;
+    }
+
+    const nextFullValue = state.dirty ? getCssOutputValue() : String(getPreview().css || state.cssFullValue || "");
 
     if (signatureChanged) {
       state.cssShowAll = false;
@@ -2452,6 +2458,7 @@
       return;
     }
 
+    const hadFilterFooter = Boolean(panel.querySelector("[data-preview-dev-css-filter-footer]"));
     const editor = panel.querySelector("[data-preview-dev-editor]");
     const scrollTop = editor instanceof HTMLTextAreaElement ? editor.scrollTop : 0;
     const scrollLeft = editor instanceof HTMLTextAreaElement ? editor.scrollLeft : 0;
@@ -2465,6 +2472,11 @@
       editor.value = state.editorValue;
       editor.scrollTop = scrollTop;
       editor.scrollLeft = scrollLeft;
+    }
+
+    if (hadFilterFooter !== isCssFilteredViewActive()) {
+      render();
+      return;
     }
 
     syncHighlightText();
