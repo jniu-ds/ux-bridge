@@ -3648,6 +3648,22 @@
     endOverridesPaneResize();
   });
 
+  document.addEventListener(
+    "pointerdown",
+    (event) => {
+      if (!state.open || panel.contains(event.target)) {
+        return;
+      }
+
+      const element = getClosestPreviewLayerElement(event.target);
+
+      if (element instanceof Element) {
+        state.allowCssRefilterFromSelection = true;
+      }
+    },
+    true
+  );
+
   panel.addEventListener("click", (event) => {
     const target = event.target;
 
