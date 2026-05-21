@@ -21,6 +21,7 @@
     cssFullValue: "",
     cssFilterSignature: "",
     cssShowAll: false,
+    allowCssRefilterFromSelection: false,
     jsFullValue: "",
     jsFilterSignature: "",
     overridesValue: "",
@@ -2570,9 +2571,10 @@
       state.selectedHtmlLine = nextHtmlSelectedLine;
       syncLineNumbers();
       syncHtmlLayerDecorations();
-      if (selectionChanged) {
+      if (selectionChanged && (!state.cssShowAll || state.allowCssRefilterFromSelection)) {
         syncCssEditorFilterFromSelection();
       }
+      state.allowCssRefilterFromSelection = false;
       syncCssLayerDecorations();
       if (selectionChanged) {
         syncJsEditorFilterFromSelection();
@@ -3362,6 +3364,7 @@
     }
 
     state.selectedHtmlLine = line;
+    state.allowCssRefilterFromSelection = true;
     syncLineNumbers();
     syncHtmlLayerDecorations();
     syncOverridesLineNumbers();
@@ -3982,6 +3985,7 @@
     const line = getHtmlLineForPreviewElement(element);
 
     if (line >= 0) {
+      state.allowCssRefilterFromSelection = true;
       state.selectedHtmlLine = line;
       syncHtmlLayerDecorations();
       window.requestAnimationFrame(syncPreviewLayerStateFromDom);
