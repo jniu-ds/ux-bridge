@@ -3551,6 +3551,7 @@
 
     if (tabButton) {
       event.preventDefault();
+      event.stopPropagation();
       const nextMode = String(tabButton.getAttribute("data-preview-dev-tab") || "").trim();
 
       if (!nextMode || nextMode === state.mode) {
@@ -3602,6 +3603,30 @@
       }
     }
   });
+
+  panel.addEventListener(
+    "pointerdown",
+    (event) => {
+      const target = event.target;
+
+      if (target instanceof Element && target.closest("[data-preview-dev-tab]")) {
+        event.stopPropagation();
+      }
+    },
+    true
+  );
+
+  panel.addEventListener(
+    "mousedown",
+    (event) => {
+      const target = event.target;
+
+      if (target instanceof Element && target.closest("[data-preview-dev-tab]")) {
+        event.stopPropagation();
+      }
+    },
+    true
+  );
 
   panel.addEventListener("input", (event) => {
     const target = event.target;
