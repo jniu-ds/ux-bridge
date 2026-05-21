@@ -413,20 +413,22 @@
       position: absolute;
       left: 0;
       right: 0;
-      bottom: 0;
+      top: var(--preview-dev-filter-footer-top, 0px);
       z-index: 8;
       display: flex;
       justify-content: center;
-      padding: 10px 12px 12px;
+      box-sizing: border-box;
+      padding: 8px 12px 16px;
       pointer-events: none;
-      background: linear-gradient(180deg, rgba(2, 6, 23, 0), rgba(2, 6, 23, 0.96) 34%, #020617 100%);
+      background: #020617;
     }
 
     .preview-dev-panel__see-all {
       pointer-events: auto;
+      width: 100%;
       border: 1px solid rgba(96, 165, 250, 0.32);
-      border-radius: 999px;
-      padding: 7px 12px;
+      border-radius: 10px;
+      padding: 9px 12px;
       color: #bfdbfe;
       background: rgba(37, 99, 235, 0.2);
       font-size: 12px;
@@ -1371,6 +1373,24 @@
 
       return `<span class="preview-dev-panel__line-number${selectedClass}" style="top: ${top}px;">${index + 1}</span>`;
     }).join("");
+
+    syncCssFilterFooterPosition();
+  }
+
+  function syncCssFilterFooterPosition() {
+    const footer = panel.querySelector("[data-preview-dev-css-filter-footer]");
+    const editor = panel.querySelector("[data-preview-dev-editor]");
+
+    if (!(footer instanceof HTMLElement) || !(editor instanceof HTMLTextAreaElement)) {
+      return;
+    }
+
+    const lineHeight = getEditorMetric(editor, "line-height", 18.6);
+    const paddingTop = getEditorMetric(editor, "padding-top", 14);
+    const lineCount = getEditorLineCount(state.editorValue);
+    const top = paddingTop + lineCount * lineHeight + 2 - editor.scrollTop;
+
+    footer.style.setProperty("--preview-dev-filter-footer-top", `${Math.max(0, top)}px`);
   }
 
   function parseOverridesValue() {
@@ -3364,7 +3384,7 @@
     const editorBodyClass = `preview-dev-panel__body${cssFilteredView ? " has-filter-footer" : ""}`;
     const cssFilterFooter = cssFilteredView
       ? `
-        <div class="preview-dev-panel__filter-footer">
+        <div class="preview-dev-panel__filter-footer" data-preview-dev-css-filter-footer>
           <button type="button" class="preview-dev-panel__see-all" data-preview-dev-css-see-all>See All</button>
         </div>
       `
