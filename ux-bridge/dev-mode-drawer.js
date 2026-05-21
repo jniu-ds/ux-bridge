@@ -39,6 +39,7 @@
     resizeStartX: 0,
     resizeStartWidth: 300,
     overridesDirty: false,
+    overridesSyncTimer: 0,
   };
   let previewStateObserver = null;
   let previewHoverOverlay = null;
@@ -290,23 +291,46 @@
       background: #020617;
     }
 
-    .preview-dev-panel__split-pane > .preview-dev-panel__body {
+    .preview-dev-panel__split-pane:not(.preview-dev-panel__split-pane--overrides) > .preview-dev-panel__body {
       height: 100%;
     }
 
     .preview-dev-panel__split-pane--overrides {
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
       border-top: 1px solid rgba(164, 41, 236, 0.3);
       background:
         linear-gradient(135deg, rgba(164, 41, 236, 0.1), rgba(2, 6, 23, 0) 62%),
         #020617;
     }
 
-    .preview-dev-panel__pane-label {
-      position: absolute;
-      top: 9px;
-      right: 12px;
+    .preview-dev-panel__section-header {
       z-index: 5;
-      pointer-events: none;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      min-height: 50px;
+      box-sizing: border-box;
+      padding: 12px 16px;
+      border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+      background:
+        linear-gradient(135deg, rgba(164, 41, 236, 0.14), rgba(15, 23, 42, 0) 58%),
+        rgba(15, 23, 42, 0.92);
+      box-shadow: 0 1px 0 rgba(2, 6, 23, 0.62);
+    }
+
+    .preview-dev-panel__section-heading {
+      margin: 0;
+      color: #f8fafc;
+      font-size: 15px;
+      font-weight: 850;
+      letter-spacing: 0;
+      line-height: 1;
+    }
+
+    .preview-dev-panel__section-meta {
+      flex: 0 0 auto;
       color: #c084fc;
       font-size: 10px;
       font-weight: 800;
@@ -1486,6 +1510,66 @@
     state.previewDomSyncFrame = window.requestAnimationFrame(syncEditorFromPreviewDom);
   }
 
+  function syncOverridesEditorFromPreview({ force = false } = {}) {
+    if (!state.open || !getBreakpointMode() || state.overridesDirty) {
+      return;
+    }
+
+    const nextValue = getContentForMode("overrides");
+
+    if (nextValue === state.overridesValue) {
+      return;
+    }
+
+    const editor = panel.querySelector("[data-preview-dev-overrides-editor]");
+
+    if (!force && editor instanceof HTMLTextAreaElement && document.activeElement === editor) {
+      return;
+    }
+
+    const scrollTop = editor instanceof HTMLTextAreaElement ? editor.scrollTop : 0;
+    const scrollLeft = editor instanceof HTMLTextAreaElement ? editor.scrollLeft : 0;
+    state.overridesValue = nextValue;
+    state.error = "";
+    state.status = "";
+
+    if (editor instanceof HTMLTextAreaElement) {
+      editor.value = state.overridesValue;
+      editor.scrollTop = scrollTop;
+      editor.scrollLeft = scrollLeft;
+    }
+
+    syncHighlightText();
+    syncHighlightScroll();
+  }
+
+  function startOverridesSync() {
+    if (state.overridesSyncTimer || typeof window === "undefined") {
+      return;
+    }
+
+    state.overridesSyncTimer = window.setInterval(() => syncOverridesEditorFromPreview(), 250);
+  }
+
+  function stopOverridesSync() {
+    if (!state.overridesSyncTimer || typeof window === "undefined") {
+      return;
+    }
+
+    window.clearInterval(state.overridesSyncTimer);
+    state.overridesSyncTimer = 0;
+  }
+
+  function syncOverridesSyncState() {
+    if (state.open && getBreakpointMode()) {
+      startOverridesSync();
+      syncOverridesEditorFromPreview();
+      return;
+    }
+
+    stopOverridesSync();
+  }
+
   function cancelPendingPreviewDomSync() {
     if (!state.previewDomSyncFrame) {
       return;
@@ -1512,6 +1596,7 @@
     previewStateObserver = new MutationObserver(() => {
       syncPreviewLayerStateFromDom();
       scheduleEditorSyncFromPreviewDom();
+      syncOverridesEditorFromPreview();
     });
     previewStateObserver.__previewRoot = root;
     previewStateObserver.observe(root, {
@@ -2054,7 +2139,10 @@
                 </div>
               </div>
               <div class="preview-dev-panel__split-pane preview-dev-panel__split-pane--overrides">
-                <span class="preview-dev-panel__pane-label">Overrides</span>
+                <div class="preview-dev-panel__section-header">
+                  <h3 class="preview-dev-panel__section-heading">JSON</h3>
+                  <span class="preview-dev-panel__section-meta">Overrides</span>
+                </div>
                 <div class="preview-dev-panel__body" data-preview-dev-overrides-body>
                   <div class="preview-dev-panel__line-numbers" data-preview-dev-overrides-line-numbers aria-hidden="true"></div>
                   <pre class="preview-dev-panel__code" data-preview-dev-overrides-code aria-hidden="true"><code>${highlightCode(state.overridesValue, "overrides")}\n</code></pre>
@@ -2082,6 +2170,7 @@
     syncLineNumbers();
     syncOverridesLineNumbers();
     syncHtmlLayerDecorations();
+    syncOverridesSyncState();
     schedulePreviewHoverOverlaySync();
   }
 
@@ -2616,6 +2705,8 @@
     if (!state.overridesDirty) {
       state.overridesValue = getContentForMode("overrides");
     }
+
+    syncOverridesEditorFromPreview({ force: true });
   }
 
   async function loadProject() {
@@ -2708,6 +2799,7 @@
     if (!state.open) {
       syncToggleState();
       state.renderedBreakpointMode = nextBreakpointMode;
+      syncOverridesSyncState();
       return;
     }
 
@@ -2718,6 +2810,7 @@
     }
 
     syncLayout();
+    syncOverridesSyncState();
   });
 
   mutationObserver.observe(document.body, { attributes: true, attributeFilter: ["class"] });
