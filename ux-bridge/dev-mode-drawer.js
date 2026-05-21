@@ -379,7 +379,7 @@
       z-index: 4;
       width: 36px;
       overflow: hidden;
-      pointer-events: none;
+      pointer-events: auto;
     }
 
     .preview-dev-panel__layer-toggle {
@@ -1310,6 +1310,15 @@
     state.previewDomSyncFrame = window.requestAnimationFrame(syncEditorFromPreviewDom);
   }
 
+  function cancelPendingPreviewDomSync() {
+    if (!state.previewDomSyncFrame) {
+      return;
+    }
+
+    window.cancelAnimationFrame(state.previewDomSyncFrame);
+    state.previewDomSyncFrame = 0;
+  }
+
   function ensurePreviewStateObserver() {
     const root = getPreviewRenderRoot();
 
@@ -1548,6 +1557,7 @@
     state.dirty = true;
     state.error = "";
     state.status = "";
+    cancelPendingPreviewDomSync();
     commitCodeHistory(state.editorValue, lineIndex);
 
     if (editor instanceof HTMLTextAreaElement) {
@@ -1915,6 +1925,29 @@
     render();
   }
 
+  panel.addEventListener(
+    "pointerdown",
+    (event) => {
+      const target = event.target;
+
+      if (!(target instanceof Element)) {
+        return;
+      }
+
+      const layerToggle = target.closest("[data-preview-dev-layer-toggle]");
+
+      if (!layerToggle) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      const line = Number.parseInt(String(layerToggle.getAttribute("data-preview-dev-line") || ""), 10);
+      toggleHtmlLayerVisibility(line);
+    },
+    true,
+  );
+
   panel.addEventListener("click", (event) => {
     const target = event.target;
 
@@ -1934,8 +1967,11 @@
 
     if (layerToggle) {
       event.preventDefault();
+      event.stopPropagation();
       const line = Number.parseInt(String(layerToggle.getAttribute("data-preview-dev-line") || ""), 10);
-      toggleHtmlLayerVisibility(line);
+      if (event.detail === 0) {
+        toggleHtmlLayerVisibility(line);
+      }
       return;
     }
 
