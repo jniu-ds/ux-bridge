@@ -1451,6 +1451,7 @@
       /\sdata-ux-layer-hidden-control=(["'])true\1/i.test(line) ||
       /\sdata-ux-layer-visible=(["'])false\1/i.test(line) ||
       /\saria-hidden=(["'])true\1/i.test(line) ||
+      /style=(["'])[^"']*display\s*:\s*none/i.test(line) ||
       /style=(["'])[^"']*visibility\s*:\s*hidden/i.test(line)
     );
   }
@@ -1557,9 +1558,44 @@
     return tag.replace(pattern, "");
   }
 
+  function getAttributeFromTag(tag, name) {
+    const pattern = new RegExp(`\\s${escapeRegExp(name)}=(["'])([\\s\\S]*?)\\1`, "i");
+    const match = tag.match(pattern);
+    return match ? match[2] : "";
+  }
+
   function getStyleAttribute(tag) {
     const match = tag.match(/\sstyle=(["'])([\s\S]*?)\1/i);
     return match ? { quote: match[1], value: match[2] } : null;
+  }
+
+  function getStylePropertyValue(tag, propertyName) {
+    const existing = getStyleAttribute(tag);
+
+    if (!existing) {
+      return "";
+    }
+
+    const propertyKey = String(propertyName || "").trim().toLowerCase();
+
+    if (!propertyKey) {
+      return "";
+    }
+
+    const item = existing.value
+      .split(";")
+      .map((entry) => entry.trim())
+      .filter(Boolean)
+      .find((entry) => {
+        const colon = entry.indexOf(":");
+        return colon >= 0 && entry.slice(0, colon).trim().toLowerCase() === propertyKey;
+      });
+
+    if (!item) {
+      return "";
+    }
+
+    return item.slice(item.indexOf(":") + 1).trim();
   }
 
   function updateStyleAttribute(tag, updates) {
@@ -1618,18 +1654,28 @@
     let tag = match[2];
 
     if (hidden) {
+      const currentDisplay = getStylePropertyValue(tag, "display");
+
+      if (currentDisplay && currentDisplay.toLowerCase() !== "none") {
+        tag = setAttributeOnTag(tag, "data-ux-layer-display-cache", currentDisplay);
+      }
+
       tag = setAttributeOnTag(tag, "data-ux-layer-hidden-control", "true");
       tag = setAttributeOnTag(tag, "data-ux-layer-visible", "false");
       tag = setAttributeOnTag(tag, "aria-hidden", "true");
       tag = updateStyleAttribute(tag, {
-        visibility: "hidden",
-        "pointer-events": "none",
+        display: "none",
+        visibility: null,
+        "pointer-events": null,
       });
     } else {
+      const cachedDisplay = getAttributeFromTag(tag, "data-ux-layer-display-cache");
       tag = removeAttributeFromTag(tag, "data-ux-layer-hidden-control");
       tag = removeAttributeFromTag(tag, "data-ux-layer-visible");
+      tag = removeAttributeFromTag(tag, "data-ux-layer-display-cache");
       tag = removeAttributeFromTag(tag, "aria-hidden");
       tag = updateStyleAttribute(tag, {
+        display: cachedDisplay || null,
         visibility: null,
         "pointer-events": null,
       });
