@@ -2556,6 +2556,7 @@
     const nextSelectedPath = selectedElement instanceof Element ? getPreviewLayerPathForElement(selectedElement) : "";
     const nextHtmlHoverLine = state.mode === "html" ? nextPreviewHoverLine : -1;
     const nextHtmlSelectedLine = state.mode === "html" ? nextSelectedLine : -1;
+    const selectionChanged = nextSelectedPath !== state.previewSelectedLayerPath || nextHtmlSelectedLine !== state.selectedHtmlLine;
 
     if (
       nextHtmlHoverLine !== state.previewHoveredHtmlLine ||
@@ -2569,9 +2570,13 @@
       state.selectedHtmlLine = nextHtmlSelectedLine;
       syncLineNumbers();
       syncHtmlLayerDecorations();
-      syncCssEditorFilterFromSelection();
+      if (selectionChanged) {
+        syncCssEditorFilterFromSelection();
+      }
       syncCssLayerDecorations();
-      syncJsEditorFilterFromSelection();
+      if (selectionChanged) {
+        syncJsEditorFilterFromSelection();
+      }
       syncJsLayerDecorations();
       syncOverridesLineNumbers();
       syncOverridesLayerDecorations();
