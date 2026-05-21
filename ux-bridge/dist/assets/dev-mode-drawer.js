@@ -31,6 +31,8 @@
     codeHistoryIndex: -1,
     codeHistoryMode: "",
     codeHistoryLine: -1,
+    renderingLivePreview: false,
+    previewDomSyncFrame: 0,
   };
   let previewStateObserver = null;
   let previewHoverOverlay = null;
@@ -243,7 +245,7 @@
       margin: 0;
       border: 0;
       border-radius: 0;
-      padding: var(--preview-dev-editor-padding-top) 16px 14px 42px;
+      padding: var(--preview-dev-editor-padding-top) 16px 14px 78px;
       overflow: auto;
       font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       tab-size: 2;
@@ -264,6 +266,38 @@
       z-index: 0;
       overflow: hidden;
       pointer-events: none;
+    }
+
+    .preview-dev-panel__line-numbers {
+      position: absolute;
+      inset: 0 auto 0 0;
+      z-index: 3;
+      width: 38px;
+      overflow: hidden;
+      pointer-events: none;
+      color: #64748b;
+      background: linear-gradient(90deg, rgba(2, 6, 23, 0.96), rgba(2, 6, 23, 0.72));
+      border-right: 1px solid rgba(148, 163, 184, 0.12);
+      font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      text-align: right;
+      user-select: none;
+    }
+
+    .preview-dev-panel__line-number {
+      position: absolute;
+      left: 0;
+      right: 7px;
+      height: var(--preview-dev-editor-line-height);
+      line-height: var(--preview-dev-editor-line-height);
+    }
+
+    .preview-dev-panel__line-number.is-selected {
+      color: #dbeafe;
+      font-weight: 800;
+    }
+
+    .preview-dev-panel.is-breakpoint-active .preview-dev-panel__line-number.is-selected {
+      color: #f3e8ff;
     }
 
     .preview-dev-panel__row-highlight {
@@ -341,8 +375,8 @@
       position: absolute;
       top: 0;
       bottom: 0;
-      left: 0;
-      z-index: 3;
+      left: 38px;
+      z-index: 4;
       width: 36px;
       overflow: hidden;
       pointer-events: none;
@@ -846,12 +880,18 @@
   function syncHighlightScroll() {
     const editor = panel.querySelector("[data-preview-dev-editor]");
     const code = panel.querySelector("[data-preview-dev-code]");
+    const lineNumbers = panel.querySelector("[data-preview-dev-line-numbers]");
 
     if (editor instanceof HTMLTextAreaElement && code instanceof HTMLElement) {
       code.scrollTop = editor.scrollTop;
       code.scrollLeft = editor.scrollLeft;
     }
 
+    if (editor instanceof HTMLTextAreaElement && lineNumbers instanceof HTMLElement) {
+      lineNumbers.scrollTop = editor.scrollTop;
+    }
+
+    syncLineNumbers();
     syncHtmlLayerDecorations();
   }
 
@@ -862,7 +902,48 @@
       code.innerHTML = `${highlightCode(state.editorValue, state.mode)}\n`;
     }
 
+    syncLineNumbers();
     syncHtmlLayerDecorations();
+  }
+
+  function getEditorLineCount(value = state.editorValue) {
+    return Math.max(1, String(value || "").split("\n").length);
+  }
+
+  function getSelectedCodeLine() {
+    if (state.mode === "html" && state.selectedHtmlLine >= 0) {
+      return state.selectedHtmlLine;
+    }
+
+    const editor = panel.querySelector("[data-preview-dev-editor]");
+
+    if (editor instanceof HTMLTextAreaElement && document.activeElement === editor) {
+      return getEditorLineFromOffset(editor.value, editor.selectionStart || 0);
+    }
+
+    return -1;
+  }
+
+  function syncLineNumbers() {
+    const lineNumbers = panel.querySelector("[data-preview-dev-line-numbers]");
+    const editor = panel.querySelector("[data-preview-dev-editor]");
+
+    if (!(lineNumbers instanceof HTMLElement)) {
+      return;
+    }
+
+    const lineHeight =
+      editor instanceof HTMLTextAreaElement ? getEditorMetric(editor, "line-height", 18.6) : Number.parseFloat(getComputedStyle(document.documentElement).fontSize) || 18.6;
+    const paddingTop = editor instanceof HTMLTextAreaElement ? getEditorMetric(editor, "padding-top", 14) : 14;
+    const scrollTop = editor instanceof HTMLTextAreaElement ? editor.scrollTop || 0 : 0;
+    const selectedLine = getSelectedCodeLine();
+
+    lineNumbers.innerHTML = Array.from({ length: getEditorLineCount() }, (_, index) => {
+      const top = paddingTop + index * lineHeight - scrollTop;
+      const selectedClass = index === selectedLine ? " is-selected" : "";
+
+      return `<span class="preview-dev-panel__line-number${selectedClass}" style="top: ${top}px;">${index + 1}</span>`;
+    }).join("");
   }
 
   function getEditorMetric(editor, property, fallback) {
@@ -1140,8 +1221,93 @@
     if (nextPreviewHoverLine !== state.previewHoveredHtmlLine || nextSelectedLine !== state.selectedHtmlLine) {
       state.previewHoveredHtmlLine = nextPreviewHoverLine;
       state.selectedHtmlLine = nextSelectedLine;
+      syncLineNumbers();
       syncHtmlLayerDecorations();
     }
+  }
+
+  function getCleanPreviewHtmlFromDom() {
+    const renderRoot = document.querySelector("[data-vibe-mobile-render]");
+
+    if (!(renderRoot instanceof Element)) {
+      return "";
+    }
+
+    const clone = renderRoot.cloneNode(true);
+
+    if (!(clone instanceof Element)) {
+      return "";
+    }
+
+    clone.querySelectorAll("[data-ux-layer-hovered], [data-ux-layer-selected]").forEach((element) => {
+      element.removeAttribute("data-ux-layer-hovered");
+      element.removeAttribute("data-ux-layer-selected");
+    });
+
+    if (clone.hasAttribute("data-ux-layer-hovered")) {
+      clone.removeAttribute("data-ux-layer-hovered");
+    }
+
+    if (clone.hasAttribute("data-ux-layer-selected")) {
+      clone.removeAttribute("data-ux-layer-selected");
+    }
+
+    return clone.innerHTML;
+  }
+
+  function syncEditorFromPreviewDom() {
+    state.previewDomSyncFrame = 0;
+
+    if (!state.open || state.mode !== "html" || state.renderingLivePreview) {
+      return;
+    }
+
+    const nextHtml = getCleanPreviewHtmlFromDom();
+    const nextValue = formatHtmlForEditor(nextHtml);
+
+    if (!nextValue || nextValue === state.editorValue) {
+      return;
+    }
+
+    const editor = panel.querySelector("[data-preview-dev-editor]");
+    const scrollTop = editor instanceof HTMLTextAreaElement ? editor.scrollTop : 0;
+    const scrollLeft = editor instanceof HTMLTextAreaElement ? editor.scrollLeft : 0;
+    state.editorValue = nextValue;
+    state.dirty = false;
+    state.error = "";
+    state.status = "";
+
+    if (state.page?.preview) {
+      state.page.preview = { ...state.page.preview, html: nextHtml };
+    }
+
+    if (state.page?.vibe?.appliedDraft) {
+      state.page.vibe.appliedDraft = { ...state.page.vibe.appliedDraft, html: nextHtml };
+    }
+
+    resetCodeHistory();
+
+    if (editor instanceof HTMLTextAreaElement) {
+      editor.value = state.editorValue;
+      editor.scrollTop = scrollTop;
+      editor.scrollLeft = scrollLeft;
+    }
+
+    syncHighlightText();
+    syncHighlightScroll();
+    syncPreviewLayerStateFromDom();
+  }
+
+  function scheduleEditorSyncFromPreviewDom() {
+    if (state.renderingLivePreview || state.mode !== "html") {
+      return;
+    }
+
+    if (state.previewDomSyncFrame) {
+      return;
+    }
+
+    state.previewDomSyncFrame = window.requestAnimationFrame(syncEditorFromPreviewDom);
   }
 
   function ensurePreviewStateObserver() {
@@ -1158,13 +1324,16 @@
     }
 
     previewStateObserver?.disconnect();
-    previewStateObserver = new MutationObserver(() => syncPreviewLayerStateFromDom());
+    previewStateObserver = new MutationObserver(() => {
+      syncPreviewLayerStateFromDom();
+      scheduleEditorSyncFromPreviewDom();
+    });
     previewStateObserver.__previewRoot = root;
     previewStateObserver.observe(root, {
       subtree: true,
       childList: true,
       attributes: true,
-      attributeFilter: ["data-ux-layer-hovered", "data-ux-layer-selected"],
+      characterData: true,
     });
     syncPreviewLayerStateFromDom();
   }
@@ -1489,16 +1658,26 @@
     emptyShell.hidden = hasContent;
     stage.hidden = !hasContent;
 
-    if (!hasContent) {
-      cleanupLivePreviewScript(renderRoot);
-      style.textContent = "";
-      renderRoot.innerHTML = "";
-      return;
-    }
+    state.renderingLivePreview = true;
 
-    style.textContent = String(nextPreview.css || "");
-    renderRoot.innerHTML = String(nextPreview.html || "");
-    runLivePreviewScript(renderRoot, nextPreview);
+    try {
+      if (!hasContent) {
+        cleanupLivePreviewScript(renderRoot);
+        style.textContent = "";
+        renderRoot.innerHTML = "";
+        return;
+      }
+
+      style.textContent = String(nextPreview.css || "");
+      renderRoot.innerHTML = String(nextPreview.html || "");
+      runLivePreviewScript(renderRoot, nextPreview);
+    } finally {
+      window.requestAnimationFrame(() => {
+        state.renderingLivePreview = false;
+        ensurePreviewStateObserver();
+        syncPreviewLayerStateFromDom();
+      });
+    }
   }
 
   function applyLivePreview() {
@@ -1556,6 +1735,7 @@
     }
 
     state.selectedHtmlLine = line;
+    syncLineNumbers();
     syncHtmlLayerDecorations();
 
     const rect = element.getBoundingClientRect();
@@ -1629,6 +1809,7 @@
       </header>
       <div class="preview-dev-panel__body" data-preview-dev-body>
         <div class="preview-dev-panel__row-highlights" data-preview-dev-row-highlights></div>
+        <div class="preview-dev-panel__line-numbers" data-preview-dev-line-numbers aria-hidden="true"></div>
         <div class="preview-dev-panel__layer-gutter" data-preview-dev-layer-gutter></div>
         <pre class="preview-dev-panel__code" data-preview-dev-code aria-hidden="true"><code>${highlightCode(state.editorValue, state.mode)}\n</code></pre>
         <textarea class="preview-dev-panel__editor" data-preview-dev-editor spellcheck="false" aria-label="${escapeHtml(state.mode)} editor">${escapeHtml(state.editorValue)}</textarea>
@@ -1638,6 +1819,7 @@
     syncToggleState();
     syncLayout();
     ensurePreviewStateObserver();
+    syncLineNumbers();
     syncHtmlLayerDecorations();
     schedulePreviewHoverOverlaySync();
   }
@@ -1777,8 +1959,13 @@
       return;
     }
 
-    if (target instanceof HTMLTextAreaElement && target.matches("[data-preview-dev-editor]") && state.mode === "html") {
-      window.requestAnimationFrame(() => selectPreviewElementForEditorCaret(target));
+    if (target instanceof HTMLTextAreaElement && target.matches("[data-preview-dev-editor]")) {
+      window.requestAnimationFrame(() => {
+        syncLineNumbers();
+        if (state.mode === "html") {
+          selectPreviewElementForEditorCaret(target);
+        }
+      });
       return;
     }
 
@@ -1843,25 +2030,33 @@
   panel.addEventListener("keyup", (event) => {
     const target = event.target;
 
-    if (!(target instanceof HTMLTextAreaElement) || !target.matches("[data-preview-dev-editor]") || state.mode !== "html") {
+    if (!(target instanceof HTMLTextAreaElement) || !target.matches("[data-preview-dev-editor]")) {
       return;
     }
 
     const navigationKeys = new Set(["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown"]);
 
     if (navigationKeys.has(event.key)) {
-      selectPreviewElementForEditorCaret(target);
+      syncLineNumbers();
+      if (state.mode === "html") {
+        selectPreviewElementForEditorCaret(target);
+      }
     }
   });
 
   panel.addEventListener("select", (event) => {
     const target = event.target;
 
-    if (!(target instanceof HTMLTextAreaElement) || !target.matches("[data-preview-dev-editor]") || state.mode !== "html") {
+    if (!(target instanceof HTMLTextAreaElement) || !target.matches("[data-preview-dev-editor]")) {
       return;
     }
 
-    window.requestAnimationFrame(() => selectPreviewElementForEditorCaret(target));
+    window.requestAnimationFrame(() => {
+      syncLineNumbers();
+      if (state.mode === "html") {
+        selectPreviewElementForEditorCaret(target);
+      }
+    });
   });
 
   document.addEventListener("mouseover", (event) => {
