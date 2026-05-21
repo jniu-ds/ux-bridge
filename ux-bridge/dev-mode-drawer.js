@@ -1064,6 +1064,7 @@
     syncLineNumbers();
     syncOverridesLineNumbers();
     syncHtmlLayerDecorations();
+    syncOverridesLayerDecorations();
   }
 
   function syncHighlightText() {
@@ -1081,6 +1082,7 @@
     syncLineNumbers();
     syncOverridesLineNumbers();
     syncHtmlLayerDecorations();
+    syncOverridesLayerDecorations();
   }
 
   function getEditorLineCount(value = state.editorValue) {
@@ -1123,6 +1125,77 @@
     }).join("");
   }
 
+  function parseOverridesValue() {
+    try {
+      const parsed = JSON.parse(state.overridesValue || "{}");
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function getJsonKeyBlockLineRange(value, key) {
+    const lines = String(value || "").split("\n");
+    const keyToken = JSON.stringify(String(key || ""));
+    const start = lines.findIndex((line) => line.trim().startsWith(`${keyToken}:`));
+
+    if (start < 0) {
+      return null;
+    }
+
+    let depth = 0;
+    let hasOpened = false;
+
+    for (let line = start; line < lines.length; line += 1) {
+      const source = lines[line] || "";
+
+      for (let index = 0; index < source.length; index += 1) {
+        const char = source[index];
+
+        if (char === "{") {
+          depth += 1;
+          hasOpened = true;
+        } else if (char === "}") {
+          depth -= 1;
+        }
+      }
+
+      if (hasOpened && depth <= 0) {
+        return { start, end: line };
+      }
+    }
+
+    return { start, end: start };
+  }
+
+  function getSelectedOverrideLines() {
+    const selectedLayerPaths = getSelectedPreviewLayerPaths();
+    const overrides = parseOverridesValue();
+    const selectedOverrideLines = new Set();
+
+    if (!selectedLayerPaths.length || !overrides) {
+      return selectedOverrideLines;
+    }
+
+    selectedLayerPaths.forEach((layerPath) => {
+      if (!Object.prototype.hasOwnProperty.call(overrides, layerPath)) {
+        return;
+      }
+
+      const range = getJsonKeyBlockLineRange(state.overridesValue, layerPath);
+
+      if (!range) {
+        return;
+      }
+
+      for (let line = range.start; line <= range.end; line += 1) {
+        selectedOverrideLines.add(line);
+      }
+    });
+
+    return selectedOverrideLines;
+  }
+
   function syncOverridesLineNumbers() {
     const lineNumbers = panel.querySelector("[data-preview-dev-overrides-line-numbers]");
     const editor = panel.querySelector("[data-preview-dev-overrides-editor]");
@@ -1137,10 +1210,11 @@
     const scrollTop = editor instanceof HTMLTextAreaElement ? editor.scrollTop || 0 : 0;
     const selectedLine =
       editor instanceof HTMLTextAreaElement && document.activeElement === editor ? getEditorLineFromOffset(editor.value, editor.selectionStart || 0) : -1;
+    const selectedOverrideLines = getSelectedOverrideLines();
 
     lineNumbers.innerHTML = Array.from({ length: getEditorLineCount(state.overridesValue) }, (_, index) => {
       const top = paddingTop + index * lineHeight - scrollTop;
-      const selectedClass = index === selectedLine ? " is-selected" : "";
+      const selectedClass = index === selectedLine || selectedOverrideLines.has(index) ? " is-selected" : "";
 
       return `<span class="preview-dev-panel__line-number${selectedClass}" style="top: ${top}px;">${index + 1}</span>`;
     }).join("");
@@ -1271,6 +1345,53 @@
     }
 
     return getHtmlLayerRows()[index]?.line ?? -1;
+  }
+
+  function getPreviewRenderContainer() {
+    const renderRoot = document.querySelector("[data-vibe-mobile-render]");
+    return renderRoot instanceof Element ? renderRoot : null;
+  }
+
+  function getPreviewLayerPathForElement(element) {
+    const container = getPreviewRenderContainer();
+
+    if (!(element instanceof Element) || !(container instanceof Element) || element === container || !container.contains(element)) {
+      return "";
+    }
+
+    const path = [];
+    let current = element;
+
+    while (current instanceof Element && current !== container) {
+      const parent = current.parentElement;
+
+      if (!(parent instanceof Element)) {
+        return "";
+      }
+
+      const index = Array.from(parent.children).indexOf(current);
+
+      if (index < 0) {
+        return "";
+      }
+
+      path.unshift(index);
+      current = parent;
+    }
+
+    return path.join(".");
+  }
+
+  function getSelectedPreviewLayerPaths() {
+    const container = getPreviewRenderContainer();
+
+    if (!(container instanceof Element)) {
+      return [];
+    }
+
+    return Array.from(container.querySelectorAll('[data-ux-layer-selected]:not([data-ux-layer-selected="false"])'))
+      .map((element) => getPreviewLayerPathForElement(element))
+      .filter(Boolean);
   }
 
   function getClosestPreviewLayerElement(target) {
@@ -1404,6 +1525,8 @@
       state.previewHoveredHtmlLine = -1;
       state.selectedHtmlLine = -1;
       syncHtmlLayerDecorations();
+      syncOverridesLineNumbers();
+      syncOverridesLayerDecorations();
       return;
     }
 
@@ -1423,6 +1546,8 @@
       state.selectedHtmlLine = nextSelectedLine;
       syncLineNumbers();
       syncHtmlLayerDecorations();
+      syncOverridesLineNumbers();
+      syncOverridesLayerDecorations();
     }
   }
 
@@ -1681,6 +1806,37 @@
             ${iconMarkup(row.hidden)}
           </button>
         `;
+      })
+      .join("");
+  }
+
+  function syncOverridesLayerDecorations() {
+    const rowHighlights = panel.querySelector("[data-preview-dev-overrides-row-highlights]");
+    const editor = panel.querySelector("[data-preview-dev-overrides-editor]");
+
+    if (!(rowHighlights instanceof HTMLElement) || !(editor instanceof HTMLTextAreaElement)) {
+      if (rowHighlights instanceof HTMLElement) {
+        rowHighlights.innerHTML = "";
+      }
+      return;
+    }
+
+    const selectedLines = getSelectedOverrideLines();
+
+    if (!selectedLines.size) {
+      rowHighlights.innerHTML = "";
+      return;
+    }
+
+    const paddingTop = getEditorMetric(editor, "padding-top", 14);
+    const lineHeight = getEditorMetric(editor, "line-height", 18.6);
+    const scrollTop = editor.scrollTop || 0;
+
+    rowHighlights.innerHTML = Array.from(selectedLines)
+      .sort((first, second) => first - second)
+      .map((line) => {
+        const top = paddingTop + line * lineHeight - scrollTop;
+        return `<div class="preview-dev-panel__row-highlight is-selected" style="top: ${top}px; height: ${lineHeight}px;"></div>`;
       })
       .join("");
   }
@@ -2055,6 +2211,8 @@
     state.selectedHtmlLine = line;
     syncLineNumbers();
     syncHtmlLayerDecorations();
+    syncOverridesLineNumbers();
+    syncOverridesLayerDecorations();
 
     const rect = element.getBoundingClientRect();
     const clientX = rect.left + Math.max(1, Math.min(rect.width / 2, rect.width - 1));
@@ -2144,6 +2302,7 @@
                   <span class="preview-dev-panel__section-meta">Overrides</span>
                 </div>
                 <div class="preview-dev-panel__body" data-preview-dev-overrides-body>
+                  <div class="preview-dev-panel__row-highlights" data-preview-dev-overrides-row-highlights></div>
                   <div class="preview-dev-panel__line-numbers" data-preview-dev-overrides-line-numbers aria-hidden="true"></div>
                   <pre class="preview-dev-panel__code" data-preview-dev-overrides-code aria-hidden="true"><code>${highlightCode(state.overridesValue, "overrides")}\n</code></pre>
                   <textarea class="preview-dev-panel__editor" data-preview-dev-overrides-editor spellcheck="false" aria-label="Overrides editor">${escapeHtml(state.overridesValue)}</textarea>
@@ -2170,6 +2329,7 @@
     syncLineNumbers();
     syncOverridesLineNumbers();
     syncHtmlLayerDecorations();
+    syncOverridesLayerDecorations();
     syncOverridesSyncState();
     schedulePreviewHoverOverlaySync();
   }
