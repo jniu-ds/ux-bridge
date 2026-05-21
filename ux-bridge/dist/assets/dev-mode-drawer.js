@@ -18,6 +18,8 @@
     error: "",
     status: "",
     editorValue: "",
+    cssFullValue: "",
+    cssFilterSignature: "",
     overridesValue: "",
     renderedMode: "",
     renderedBreakpointMode: null,
@@ -26,6 +28,7 @@
     hoveredOverridePath: "",
     previewHoveredHtmlLine: -1,
     previewHoveredLayerPath: "",
+    previewSelectedLayerPath: "",
     selectedHtmlLine: -1,
     activePreviewHoverElement: null,
     activePreviewHoverElements: [],
@@ -943,7 +946,7 @@
     const preview = getPreview();
 
     if (mode === "css") {
-      return String(preview.css || "");
+      return getFilteredCssForSelectedLayer(String(preview.css || state.cssFullValue || ""));
     }
 
     if (mode === "js") {
@@ -1036,6 +1039,11 @@
     if (!tabs.some((tab) => tab.id === state.mode)) {
       state.mode = tabs[0]?.id || "html";
       preserveDirty = false;
+    }
+
+    if (state.mode === "css") {
+      state.cssFullValue = String(getPreview().css || "");
+      state.cssFilterSignature = getCssFilterSignature();
     }
 
     if (!preserveDirty || !state.dirty) {
@@ -1556,6 +1564,136 @@
     return rules;
   }
 
+  function getCssRuleSource(value, rule) {
+    const lines = String(value || "").split("\n");
+
+    if (!rule || !Number.isInteger(rule.start) || !Number.isInteger(rule.end)) {
+      return "";
+    }
+
+    return lines.slice(rule.start, rule.end + 1).join("\n");
+  }
+
+  function selectorMatchesElement(selector, element) {
+    if (!(element instanceof Element)) {
+      return false;
+    }
+
+    try {
+      return element.matches(selector);
+    } catch {
+      return false;
+    }
+  }
+
+  function cssRuleMatchesElements(rule, elements) {
+    if (!rule?.selectors?.length || !Array.isArray(elements) || !elements.length) {
+      return false;
+    }
+
+    return rule.selectors.some((selector) => elements.some((element) => selectorMatchesElement(selector, element)));
+  }
+
+  function getSelectedCssLayerElements() {
+    const root = getPreviewRenderRoot();
+
+    if (!(root instanceof Element)) {
+      return [];
+    }
+
+    const selectedElements = Array.from(root.querySelectorAll('[data-ux-layer-selected]:not([data-ux-layer-selected="false"])')).filter(
+      (element) => element instanceof Element,
+    );
+
+    return root.matches('[data-ux-layer-selected]:not([data-ux-layer-selected="false"])') ? [root, ...selectedElements] : selectedElements;
+  }
+
+  function getSelectedCssRules(value) {
+    const selectedElements = getSelectedCssLayerElements();
+
+    if (!selectedElements.length) {
+      return [];
+    }
+
+    return getCssRules(value).filter((rule) => cssRuleMatchesElements(rule, selectedElements));
+  }
+
+  function getCssFilterSignature() {
+    return getSelectedCssLayerElements()
+      .map((element) => getPreviewLayerPathForElement(element))
+      .filter(Boolean)
+      .join("|");
+  }
+
+  function getFilteredCssForSelectedLayer(value) {
+    const selectedRules = getSelectedCssRules(value);
+
+    if (!getSelectedCssLayerElements().length) {
+      return String(value || "");
+    }
+
+    return selectedRules.map((rule) => getCssRuleSource(value, rule)).filter(Boolean).join("\n\n");
+  }
+
+  function getCssOutputValue() {
+    const fullCss = String(state.cssFullValue || getPreview().css || "");
+
+    if (state.mode !== "css" || !getSelectedCssLayerElements().length) {
+      return state.mode === "css" ? state.editorValue : fullCss;
+    }
+
+    const fullRules = getCssRules(fullCss);
+    const editedRules = getCssRules(state.editorValue);
+    const selectedElements = getSelectedCssLayerElements();
+    const editedSources = editedRules.map((rule) => getCssRuleSource(state.editorValue, rule));
+    const editedBySelector = new Map();
+
+    editedRules.forEach((rule) => {
+      const key = rule.selector;
+      const entries = editedBySelector.get(key) || [];
+      entries.push(getCssRuleSource(state.editorValue, rule));
+      editedBySelector.set(key, entries);
+    });
+
+    const fullLines = fullCss.split("\n");
+    const chunks = [];
+    let cursor = 0;
+
+    fullRules.forEach((rule) => {
+      const matchesSelection = cssRuleMatchesElements(rule, selectedElements);
+
+      if (!matchesSelection) {
+        return;
+      }
+
+      if (cursor < rule.start) {
+        chunks.push(fullLines.slice(cursor, rule.start).join("\n"));
+      }
+
+      const replacements = editedBySelector.get(rule.selector) || [];
+      const replacement = replacements.length ? replacements.shift() : editedSources.shift() || "";
+
+      if (replacement) {
+        const sourceIndex = editedSources.indexOf(replacement);
+        if (sourceIndex >= 0) {
+          editedSources.splice(sourceIndex, 1);
+        }
+      }
+
+      if (replacement) {
+        chunks.push(replacement);
+      }
+
+      cursor = rule.end + 1;
+    });
+
+    if (cursor < fullLines.length) {
+      chunks.push(fullLines.slice(cursor).join("\n"));
+    }
+
+    return chunks.filter((chunk, index) => chunk || index === 0).join("\n").replace(/\n{4,}/g, "\n\n\n");
+  }
+
   function getCssRuleFromPointer(event) {
     if (state.mode !== "css") {
       return null;
@@ -1939,6 +2077,37 @@
     syncCssLayerDecorations();
   }
 
+  function syncCssEditorFilterFromSelection({ force = false } = {}) {
+    if (state.mode !== "css" || state.dirty) {
+      return;
+    }
+
+    const nextFullValue = String(getPreview().css || state.cssFullValue || "");
+    const nextSignature = getCssFilterSignature();
+    const nextEditorValue = getFilteredCssForSelectedLayer(nextFullValue);
+
+    if (!force && nextFullValue === state.cssFullValue && nextSignature === state.cssFilterSignature && nextEditorValue === state.editorValue) {
+      return;
+    }
+
+    const editor = panel.querySelector("[data-preview-dev-editor]");
+    const scrollTop = editor instanceof HTMLTextAreaElement ? editor.scrollTop : 0;
+    const scrollLeft = editor instanceof HTMLTextAreaElement ? editor.scrollLeft : 0;
+
+    state.cssFullValue = nextFullValue;
+    state.cssFilterSignature = nextSignature;
+    state.editorValue = nextEditorValue;
+    resetCodeHistory();
+
+    if (editor instanceof HTMLTextAreaElement) {
+      editor.value = state.editorValue;
+      editor.scrollTop = scrollTop;
+      editor.scrollLeft = scrollLeft;
+    }
+
+    syncHighlightText();
+  }
+
   function setOverridesHoveredPath(layerPath) {
     const nextPath = String(layerPath || "").trim();
 
@@ -1962,8 +2131,11 @@
     if (!(root instanceof Element)) {
       state.previewHoveredHtmlLine = -1;
       state.previewHoveredLayerPath = "";
+      state.previewSelectedLayerPath = "";
       state.selectedHtmlLine = -1;
       syncHtmlLayerDecorations();
+      syncCssEditorFilterFromSelection();
+      syncCssLayerDecorations();
       syncOverridesLineNumbers();
       syncOverridesLayerDecorations();
       return;
@@ -1974,19 +2146,24 @@
     const nextPreviewHoverLine = hoveredElement instanceof Element ? getHtmlLineForPreviewElement(hoveredElement) : -1;
     const nextPreviewHoverPath = hoveredElement instanceof Element ? getPreviewLayerPathForElement(hoveredElement) : "";
     const nextSelectedLine = selectedElement instanceof Element ? getHtmlLineForPreviewElement(selectedElement) : -1;
+    const nextSelectedPath = selectedElement instanceof Element ? getPreviewLayerPathForElement(selectedElement) : "";
     const nextHtmlHoverLine = state.mode === "html" ? nextPreviewHoverLine : -1;
     const nextHtmlSelectedLine = state.mode === "html" ? nextSelectedLine : -1;
 
     if (
       nextHtmlHoverLine !== state.previewHoveredHtmlLine ||
       nextPreviewHoverPath !== state.previewHoveredLayerPath ||
+      nextSelectedPath !== state.previewSelectedLayerPath ||
       nextHtmlSelectedLine !== state.selectedHtmlLine
     ) {
       state.previewHoveredHtmlLine = nextHtmlHoverLine;
       state.previewHoveredLayerPath = nextPreviewHoverPath;
+      state.previewSelectedLayerPath = nextSelectedPath;
       state.selectedHtmlLine = nextHtmlSelectedLine;
       syncLineNumbers();
       syncHtmlLayerDecorations();
+      syncCssEditorFilterFromSelection();
+      syncCssLayerDecorations();
       syncOverridesLineNumbers();
       syncOverridesLayerDecorations();
     }
@@ -2582,7 +2759,7 @@
     if (state.mode === "html") {
       nextPreview.html = state.editorValue;
     } else if (state.mode === "css") {
-      nextPreview.css = state.editorValue;
+      nextPreview.css = getCssOutputValue();
     } else if (state.mode === "js") {
       nextPreview.js = state.editorValue;
     }
@@ -3049,6 +3226,10 @@
       }
 
       state.mode = nextMode;
+      if (state.mode === "css") {
+        state.cssFullValue = String(getPreview().css || "");
+        state.cssFilterSignature = getCssFilterSignature();
+      }
       state.editorValue = getContentForMode(nextMode);
       state.dirty = false;
       state.error = "";
@@ -3337,7 +3518,7 @@
     if (state.mode === "html") {
       payload.html = state.editorValue;
     } else if (state.mode === "css") {
-      payload.css = state.editorValue;
+      payload.css = getCssOutputValue();
     } else if (state.mode === "js") {
       payload.js = state.editorValue;
     }
@@ -3432,6 +3613,8 @@
 
     state.project = project || null;
     state.page = page;
+    state.cssFullValue = String(getPreview().css || "");
+    state.cssFilterSignature = state.mode === "css" ? getCssFilterSignature() : "";
 
     if (!state.dirty) {
       state.editorValue = getContentForMode(state.mode);
