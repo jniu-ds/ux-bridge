@@ -22,11 +22,13 @@
     renderedMode: "",
     renderedBreakpointMode: null,
     hoveredHtmlLine: -1,
+    hoveredCssRule: null,
     hoveredOverridePath: "",
     previewHoveredHtmlLine: -1,
     previewHoveredLayerPath: "",
     selectedHtmlLine: -1,
     activePreviewHoverElement: null,
+    activePreviewHoverElements: [],
     autosaveTimer: 0,
     saveRequestId: 0,
     pendingAutosavePayload: null,
@@ -48,7 +50,7 @@
     overridesSyncTimer: 0,
   };
   let previewStateObserver = null;
-  let previewHoverOverlay = null;
+  const previewHoverOverlays = [];
   let previewHoverOverlayFrame = 0;
 
   const style = document.createElement("style");
@@ -1242,6 +1244,7 @@
     syncLineNumbers();
     syncOverridesLineNumbers();
     syncHtmlLayerDecorations();
+    syncCssLayerDecorations();
     syncOverridesLayerDecorations();
   }
 
@@ -1461,6 +1464,142 @@
       .filter(Boolean);
   }
 
+  function getCssRules(value = state.editorValue) {
+    if (state.mode !== "css") {
+      return [];
+    }
+
+    const lines = String(value || "").split("\n");
+    const rules = [];
+    let pendingStart = -1;
+    let pendingSelector = "";
+    let activeRule = null;
+    let depth = 0;
+
+    lines.forEach((line, index) => {
+      const trimmed = line.trim();
+
+      if (!activeRule && !pendingSelector && !trimmed) {
+        return;
+      }
+
+      if (!activeRule && pendingStart < 0 && trimmed) {
+        pendingStart = index;
+      }
+
+      let cursor = 0;
+
+      while (cursor < line.length) {
+        const openIndex = line.indexOf("{", cursor);
+        const closeIndex = line.indexOf("}", cursor);
+
+        if (activeRule) {
+          if (closeIndex >= 0 && (openIndex < 0 || closeIndex < openIndex)) {
+            depth -= 1;
+            cursor = closeIndex + 1;
+
+            if (depth <= 0) {
+              activeRule.end = index;
+              rules.push(activeRule);
+              activeRule = null;
+              pendingStart = -1;
+              pendingSelector = "";
+              depth = 0;
+            }
+            continue;
+          }
+
+          if (openIndex >= 0) {
+            depth += 1;
+            cursor = openIndex + 1;
+            continue;
+          }
+
+          break;
+        }
+
+        if (openIndex < 0) {
+          pendingSelector += `${line.slice(cursor)}\n`;
+          break;
+        }
+
+        pendingSelector += line.slice(cursor, openIndex);
+        const selector = pendingSelector.trim();
+        const selectors = selector
+          .split(",")
+          .map((entry) => entry.trim())
+          .filter(Boolean);
+
+        if (selector && !selector.startsWith("@") && selectors.length) {
+          activeRule = {
+            start: pendingStart >= 0 ? pendingStart : index,
+            end: index,
+            selector,
+            selectors,
+          };
+        }
+
+        depth = 1;
+        cursor = openIndex + 1;
+
+        if (!activeRule) {
+          pendingStart = -1;
+          pendingSelector = "";
+        }
+      }
+
+      if (activeRule) {
+        activeRule.end = index;
+      }
+    });
+
+    return rules;
+  }
+
+  function getCssRuleFromPointer(event) {
+    if (state.mode !== "css") {
+      return null;
+    }
+
+    const editor = panel.querySelector("[data-preview-dev-editor]");
+
+    if (!(editor instanceof HTMLTextAreaElement)) {
+      return null;
+    }
+
+    const rect = editor.getBoundingClientRect();
+    const lineHeight = getEditorMetric(editor, "line-height", 18.6);
+    const paddingTop = getEditorMetric(editor, "padding-top", 14);
+    const nextLine = Math.max(0, Math.floor((event.clientY - rect.top + editor.scrollTop - paddingTop) / lineHeight));
+
+    return getCssRules().find((rule) => nextLine >= rule.start && nextLine <= rule.end) || null;
+  }
+
+  function getPreviewElementsForCssRule(rule) {
+    const root = getPreviewRenderRoot();
+
+    if (!(root instanceof Element) || !rule?.selectors?.length) {
+      return [];
+    }
+
+    const matches = [];
+
+    rule.selectors.forEach((selector) => {
+      try {
+        const selectorMatches = root.matches(selector) ? [root, ...Array.from(root.querySelectorAll(selector))] : Array.from(root.querySelectorAll(selector));
+        selectorMatches.forEach((element) => {
+          if (element instanceof Element && !matches.includes(element)) {
+            matches.push(element);
+          }
+        });
+      } catch {
+        // Ignore selectors the browser cannot query, such as pseudo-element selectors.
+      }
+    });
+
+    return matches;
+  }
+
   function getActiveHoverLine() {
     return state.hoveredHtmlLine >= 0 ? state.hoveredHtmlLine : state.previewHoveredHtmlLine;
   }
@@ -1661,17 +1800,18 @@
     );
   }
 
-  function ensurePreviewHoverOverlay() {
-    if (previewHoverOverlay instanceof HTMLElement) {
-      return previewHoverOverlay;
+  function ensurePreviewHoverOverlay(index = 0) {
+    if (previewHoverOverlays[index] instanceof HTMLElement) {
+      return previewHoverOverlays[index];
     }
 
-    previewHoverOverlay = document.createElement("div");
-    previewHoverOverlay.className = "preview-dev-layer-hover-overlay";
-    previewHoverOverlay.setAttribute("data-preview-dev-layer-hover-overlay", "");
-    previewHoverOverlay.innerHTML = `<span class="preview-dev-layer-hover-overlay__label" data-preview-dev-layer-hover-label></span>`;
-    document.body.append(previewHoverOverlay);
-    return previewHoverOverlay;
+    const overlay = document.createElement("div");
+    overlay.className = "preview-dev-layer-hover-overlay";
+    overlay.setAttribute("data-preview-dev-layer-hover-overlay", "");
+    overlay.innerHTML = `<span class="preview-dev-layer-hover-overlay__label" data-preview-dev-layer-hover-label></span>`;
+    document.body.append(overlay);
+    previewHoverOverlays[index] = overlay;
+    return overlay;
   }
 
   function getPreviewHoverLabel(rect) {
@@ -1687,28 +1827,32 @@
 
   function syncPreviewHoverOverlay() {
     previewHoverOverlayFrame = 0;
-    const overlay = ensurePreviewHoverOverlay();
-    const element = state.activePreviewHoverElement instanceof Element ? state.activePreviewHoverElement : null;
+    const elements = Array.isArray(state.activePreviewHoverElements) ? state.activePreviewHoverElements.filter((element) => element instanceof Element) : [];
 
-    if (!state.open || !(element instanceof Element) || !element.isConnected) {
-      overlay.classList.remove("is-visible");
+    if (!state.open || !elements.length) {
+      previewHoverOverlays.forEach((overlay) => overlay?.classList?.remove("is-visible"));
       return;
     }
 
-    const rect = element.getBoundingClientRect();
+    elements.forEach((element, index) => {
+      const overlay = ensurePreviewHoverOverlay(index);
+      const rect = element.getBoundingClientRect();
 
-    if (rect.width <= 0 || rect.height <= 0) {
-      overlay.classList.remove("is-visible");
-      return;
-    }
+      if (!element.isConnected || rect.width <= 0 || rect.height <= 0) {
+        overlay.classList.remove("is-visible");
+        return;
+      }
 
-    overlay.style.left = `${rect.left}px`;
-    overlay.style.top = `${rect.top}px`;
-    overlay.style.width = `${rect.width}px`;
-    overlay.style.height = `${rect.height}px`;
-    overlay.querySelector("[data-preview-dev-layer-hover-label]")?.replaceChildren(getPreviewHoverLabel(rect));
-    overlay.classList.toggle("is-breakpoint-override", hasCurrentBreakpointOverride(getPreviewLayerPathForElement(element)));
-    overlay.classList.add("is-visible");
+      overlay.style.left = `${rect.left}px`;
+      overlay.style.top = `${rect.top}px`;
+      overlay.style.width = `${rect.width}px`;
+      overlay.style.height = `${rect.height}px`;
+      overlay.querySelector("[data-preview-dev-layer-hover-label]")?.replaceChildren(getPreviewHoverLabel(rect));
+      overlay.classList.toggle("is-breakpoint-override", hasCurrentBreakpointOverride(getPreviewLayerPathForElement(element)));
+      overlay.classList.add("is-visible");
+    });
+
+    previewHoverOverlays.slice(elements.length).forEach((overlay) => overlay?.classList?.remove("is-visible"));
   }
 
   function schedulePreviewHoverOverlaySync() {
@@ -1730,21 +1874,33 @@
   }
 
   function activatePreviewHoverForElement(nextElement) {
-    const previousElement = state.activePreviewHoverElement instanceof Element ? state.activePreviewHoverElement : null;
+    activatePreviewHoverForElements(nextElement instanceof Element ? [nextElement] : []);
+  }
 
-    if (previousElement === nextElement) {
+  function activatePreviewHoverForElements(nextElements) {
+    const normalizedElements = Array.from(new Set((Array.isArray(nextElements) ? nextElements : []).filter((element) => element instanceof Element)));
+    const previousElements = Array.isArray(state.activePreviewHoverElements)
+      ? state.activePreviewHoverElements.filter((element) => element instanceof Element)
+      : state.activePreviewHoverElement instanceof Element
+        ? [state.activePreviewHoverElement]
+        : [];
+    const sameElements =
+      previousElements.length === normalizedElements.length && previousElements.every((element, index) => element === normalizedElements[index]);
+
+    if (sameElements) {
       return;
     }
 
-    if (previousElement) {
-      dispatchLayerMouseEvent(previousElement, "mouseout", nextElement || document.body);
-    }
+    previousElements
+      .filter((element) => !normalizedElements.includes(element))
+      .forEach((element) => dispatchLayerMouseEvent(element, "mouseout", normalizedElements[0] || document.body));
 
-    state.activePreviewHoverElement = nextElement instanceof Element ? nextElement : null;
+    state.activePreviewHoverElements = normalizedElements;
+    state.activePreviewHoverElement = normalizedElements[0] || null;
 
-    if (nextElement instanceof Element) {
-      dispatchLayerMouseEvent(nextElement, "mouseover", previousElement || document.body);
-    }
+    normalizedElements
+      .filter((element) => !previousElements.includes(element))
+      .forEach((element) => dispatchLayerMouseEvent(element, "mouseover", previousElements[0] || document.body));
 
     schedulePreviewHoverOverlaySync();
   }
@@ -1760,6 +1916,27 @@
     state.hoveredHtmlLine = nextLine;
     activatePreviewHoverForLine(nextLine);
     syncHtmlLayerDecorations();
+  }
+
+  function setCssHoveredRule(rule) {
+    const nextRule = rule && typeof rule === "object" ? rule : null;
+    const currentRule = state.hoveredCssRule;
+    const sameRule =
+      (!currentRule && !nextRule) ||
+      (currentRule &&
+        nextRule &&
+        currentRule.start === nextRule.start &&
+        currentRule.end === nextRule.end &&
+        currentRule.selector === nextRule.selector);
+
+    if (sameRule) {
+      schedulePreviewHoverOverlaySync();
+      return;
+    }
+
+    state.hoveredCssRule = nextRule;
+    activatePreviewHoverForElements(nextRule ? getPreviewElementsForCssRule(nextRule) : []);
+    syncCssLayerDecorations();
   }
 
   function setOverridesHoveredPath(layerPath) {
@@ -2117,6 +2294,38 @@
             ${iconMarkup(row.hidden)}
           </button>
         `;
+      })
+      .join("");
+  }
+
+  function syncCssLayerDecorations() {
+    const rowHighlights = panel.querySelector("[data-preview-dev-row-highlights]");
+    const editor = panel.querySelector("[data-preview-dev-editor]");
+
+    if (!(rowHighlights instanceof HTMLElement) || !(editor instanceof HTMLTextAreaElement) || state.mode !== "css") {
+      return;
+    }
+
+    const rule = state.hoveredCssRule;
+
+    if (!rule) {
+      rowHighlights.innerHTML = "";
+      return;
+    }
+
+    const paddingTop = getEditorMetric(editor, "padding-top", 14);
+    const lineHeight = getEditorMetric(editor, "line-height", 18.6);
+    const scrollTop = editor.scrollTop || 0;
+    const lines = [];
+
+    for (let line = rule.start; line <= rule.end; line += 1) {
+      lines.push(line);
+    }
+
+    rowHighlights.innerHTML = lines
+      .map((line) => {
+        const top = paddingTop + line * lineHeight - scrollTop;
+        return `<div class="preview-dev-panel__row-highlight" style="top: ${top}px; height: ${lineHeight}px;"></div>`;
       })
       .join("");
   }
@@ -2844,6 +3053,10 @@
       state.dirty = false;
       state.error = "";
       state.status = "";
+      state.hoveredHtmlLine = -1;
+      state.hoveredCssRule = null;
+      state.hoveredOverridePath = "";
+      activatePreviewHoverForElements([]);
       resetCodeHistory();
       render();
       return;
@@ -2922,7 +3135,15 @@
 
     if (target.closest("[data-preview-dev-overrides-body]")) {
       setCodeHoveredLine(-1);
+      setCssHoveredRule(null);
       setOverridesHoveredPath(getOverrideLayerPathFromPointer(event));
+      return;
+    }
+
+    if (state.mode === "css" && target.closest("[data-preview-dev-body]")) {
+      setCodeHoveredLine(-1);
+      setOverridesHoveredPath("");
+      setCssHoveredRule(getCssRuleFromPointer(event));
       return;
     }
 
@@ -2930,6 +3151,7 @@
       return;
     }
 
+    setCssHoveredRule(null);
     setOverridesHoveredPath("");
     setCodeHoveredLine(getHtmlLayerLineFromPointer(event));
   });
@@ -2942,6 +3164,7 @@
     }
 
     setCodeHoveredLine(-1);
+    setCssHoveredRule(null);
     setOverridesHoveredPath("");
   });
 
