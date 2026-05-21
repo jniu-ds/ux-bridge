@@ -38,6 +38,10 @@
     resizingPanel: false,
     resizeStartX: 0,
     resizeStartWidth: 300,
+    overridesPaneHeight: 0,
+    resizingOverridesPane: false,
+    overridesResizeStartY: 0,
+    overridesResizeStartHeight: 0,
     overridesDirty: false,
     overridesSyncTimer: 0,
   };
@@ -280,7 +284,7 @@
     .preview-dev-panel__split {
       min-height: 0;
       display: grid;
-      grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+      grid-template-rows: minmax(0, 1fr) var(--preview-dev-overrides-pane-height, minmax(0, 1fr));
       background: #020617;
     }
 
@@ -302,6 +306,35 @@
       background:
         linear-gradient(135deg, rgba(164, 41, 236, 0.1), rgba(2, 6, 23, 0) 62%),
         #020617;
+    }
+
+    .preview-dev-panel__split-resize-handle {
+      position: absolute;
+      top: -4px;
+      left: 0;
+      right: 0;
+      z-index: 7;
+      height: 8px;
+      cursor: ns-resize;
+      background: transparent;
+      touch-action: none;
+    }
+
+    .preview-dev-panel__split-resize-handle::after {
+      content: "";
+      position: absolute;
+      top: 3px;
+      left: 0;
+      right: 0;
+      height: 1px;
+      background: transparent;
+      transition: background 0.12s ease;
+    }
+
+    .preview-dev-panel__split-resize-handle:hover::after,
+    .preview-dev-panel__split-resize-handle:focus-visible::after,
+    body.preview-dev-overrides-resizing .preview-dev-panel__split-resize-handle::after {
+      background: rgba(164, 41, 236, 0.78);
     }
 
     .preview-dev-panel__section-header {
@@ -1043,6 +1076,86 @@
 
     state.resizingPanel = false;
     document.body.classList.remove("preview-dev-resizing");
+  }
+
+  function getOverridesPaneBounds() {
+    const split = panel.querySelector("[data-preview-dev-split]");
+    const header = panel.querySelector("[data-preview-dev-overrides-header]");
+
+    if (!(split instanceof HTMLElement) || !(header instanceof HTMLElement)) {
+      return { min: 50, max: 50 };
+    }
+
+    const splitRect = split.getBoundingClientRect();
+    const headerRect = header.getBoundingClientRect();
+    const min = Math.max(1, Math.ceil(headerRect.height || 50));
+    const max = Math.max(min, Math.floor(splitRect.height || min));
+
+    return { min, max };
+  }
+
+  function clampOverridesPaneHeight(value) {
+    const { min, max } = getOverridesPaneBounds();
+    const numericValue = Number(value);
+
+    if (!Number.isFinite(numericValue) || numericValue <= 0) {
+      return 0;
+    }
+
+    return Math.max(min, Math.min(max, Math.round(numericValue)));
+  }
+
+  function syncOverridesPaneLayout() {
+    const split = panel.querySelector("[data-preview-dev-split]");
+
+    if (!(split instanceof HTMLElement)) {
+      return;
+    }
+
+    if (!state.overridesPaneHeight) {
+      split.style.removeProperty("--preview-dev-overrides-pane-height");
+      return;
+    }
+
+    state.overridesPaneHeight = clampOverridesPaneHeight(state.overridesPaneHeight);
+    split.style.setProperty("--preview-dev-overrides-pane-height", `${state.overridesPaneHeight}px`);
+  }
+
+  function startOverridesPaneResize(event) {
+    const { min, max } = getOverridesPaneBounds();
+    const overridesPane = panel.querySelector("[data-preview-dev-overrides-pane]");
+    const currentHeight = overridesPane instanceof HTMLElement ? overridesPane.getBoundingClientRect().height : (min + max) / 2;
+
+    state.resizingOverridesPane = true;
+    state.overridesResizeStartY = event.clientY;
+    state.overridesResizeStartHeight = Math.max(min, Math.min(max, Math.round(currentHeight)));
+    document.body.classList.add("preview-dev-overrides-resizing");
+
+    try {
+      event.target?.setPointerCapture?.(event.pointerId);
+    } catch {
+      // Pointer capture is a progressive enhancement here.
+    }
+  }
+
+  function updateOverridesPaneResize(event) {
+    if (!state.resizingOverridesPane) {
+      return;
+    }
+
+    const delta = state.overridesResizeStartY - event.clientY;
+    state.overridesPaneHeight = clampOverridesPaneHeight(state.overridesResizeStartHeight + delta);
+    syncOverridesPaneLayout();
+    syncHighlightScroll();
+  }
+
+  function endOverridesPaneResize() {
+    if (!state.resizingOverridesPane) {
+      return;
+    }
+
+    state.resizingOverridesPane = false;
+    document.body.classList.remove("preview-dev-overrides-resizing");
   }
 
   function syncHighlightScroll() {
@@ -2286,7 +2399,7 @@
       ${
         breakpointMode
           ? `
-            <div class="preview-dev-panel__split">
+            <div class="preview-dev-panel__split" data-preview-dev-split>
               <div class="preview-dev-panel__split-pane">
                 <div class="preview-dev-panel__body" data-preview-dev-body>
                   <div class="preview-dev-panel__row-highlights" data-preview-dev-row-highlights></div>
@@ -2296,8 +2409,9 @@
                   <textarea class="preview-dev-panel__editor" data-preview-dev-editor spellcheck="false" aria-label="${escapeHtml(state.mode)} editor">${escapeHtml(state.editorValue)}</textarea>
                 </div>
               </div>
-              <div class="preview-dev-panel__split-pane preview-dev-panel__split-pane--overrides">
-                <div class="preview-dev-panel__section-header">
+              <div class="preview-dev-panel__split-pane preview-dev-panel__split-pane--overrides" data-preview-dev-overrides-pane>
+                <div class="preview-dev-panel__split-resize-handle" data-preview-dev-split-resize-handle role="separator" aria-orientation="horizontal" aria-label="Resize JSON Overrides area" tabindex="0"></div>
+                <div class="preview-dev-panel__section-header" data-preview-dev-overrides-header>
                   <h3 class="preview-dev-panel__section-heading">JSON</h3>
                   <span class="preview-dev-panel__section-meta">Overrides</span>
                 </div>
@@ -2325,6 +2439,7 @@
 
     syncToggleState();
     syncLayout();
+    syncOverridesPaneLayout();
     ensurePreviewStateObserver();
     syncLineNumbers();
     syncOverridesLineNumbers();
@@ -2437,6 +2552,15 @@
       const layerToggle = target.closest("[data-preview-dev-layer-toggle]");
 
       if (!layerToggle) {
+        const splitResizeHandle = target.closest("[data-preview-dev-split-resize-handle]");
+
+        if (splitResizeHandle) {
+          event.preventDefault();
+          event.stopPropagation();
+          startOverridesPaneResize(event);
+          return;
+        }
+
         const resizeHandle = target.closest("[data-preview-dev-resize-handle]");
 
         if (resizeHandle) {
@@ -2458,10 +2582,17 @@
 
   document.addEventListener("pointermove", (event) => {
     updatePanelResize(event);
+    updateOverridesPaneResize(event);
   });
 
-  document.addEventListener("pointerup", endPanelResize);
-  document.addEventListener("pointercancel", endPanelResize);
+  document.addEventListener("pointerup", () => {
+    endPanelResize();
+    endOverridesPaneResize();
+  });
+  document.addEventListener("pointercancel", () => {
+    endPanelResize();
+    endOverridesPaneResize();
+  });
 
   panel.addEventListener("click", (event) => {
     const target = event.target;
@@ -2976,6 +3107,7 @@
   mutationObserver.observe(document.body, { attributes: true, attributeFilter: ["class"] });
   window.addEventListener("resize", () => {
     syncLayout();
+    syncOverridesPaneLayout();
     schedulePreviewHoverOverlaySync();
   });
   document.addEventListener("scroll", schedulePreviewHoverOverlaySync, true);
