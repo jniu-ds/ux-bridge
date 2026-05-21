@@ -22,7 +22,9 @@
     renderedMode: "",
     renderedBreakpointMode: null,
     hoveredHtmlLine: -1,
+    hoveredOverridePath: "",
     previewHoveredHtmlLine: -1,
+    previewHoveredLayerPath: "",
     selectedHtmlLine: -1,
     activePreviewHoverElement: null,
     autosaveTimer: 0,
@@ -1281,6 +1283,37 @@
     return { start, end: start };
   }
 
+  function getOverrideLayerPathForLine(line) {
+    const normalizedLine = Number.isInteger(line) && line >= 0 ? line : -1;
+    const overrides = parseOverridesValue();
+
+    if (normalizedLine < 0 || !overrides) {
+      return "";
+    }
+
+    return (
+      Object.keys(overrides).find((layerPath) => {
+        const range = getJsonKeyBlockLineRange(state.overridesValue, layerPath);
+        return !!range && normalizedLine >= range.start && normalizedLine <= range.end;
+      }) || ""
+    );
+  }
+
+  function getOverrideLayerPathFromPointer(event) {
+    const editor = panel.querySelector("[data-preview-dev-overrides-editor]");
+
+    if (!(editor instanceof HTMLTextAreaElement)) {
+      return "";
+    }
+
+    const rect = editor.getBoundingClientRect();
+    const lineHeight = getEditorMetric(editor, "line-height", 18.6);
+    const paddingTop = getEditorMetric(editor, "padding-top", 14);
+    const nextLine = Math.max(0, Math.floor((event.clientY - rect.top + editor.scrollTop - paddingTop) / lineHeight));
+
+    return getOverrideLayerPathForLine(nextLine);
+  }
+
   function getSelectedOverrideLines() {
     const selectedLayerPaths = getSelectedPreviewLayerPaths();
     const overrides = parseOverridesValue();
@@ -1389,6 +1422,29 @@
     }
 
     return [root, ...Array.from(root.querySelectorAll("*"))];
+  }
+
+  function getPreviewElementForLayerPath(layerPath) {
+    const container = getPreviewRenderContainer();
+    const path = String(layerPath || "")
+      .split(".")
+      .map((part) => Number.parseInt(part, 10));
+
+    if (!(container instanceof Element) || !path.length || path.some((index) => !Number.isInteger(index) || index < 0)) {
+      return null;
+    }
+
+    let element = container;
+
+    for (const index of path) {
+      element = element.children[index] || null;
+
+      if (!(element instanceof Element)) {
+        return null;
+      }
+    }
+
+    return element;
   }
 
   function getHtmlLayerRowByLine(line) {
@@ -1571,7 +1627,7 @@
     const overlay = ensurePreviewHoverOverlay();
     const element = state.activePreviewHoverElement instanceof Element ? state.activePreviewHoverElement : null;
 
-    if (!state.open || state.mode !== "html" || !(element instanceof Element) || !element.isConnected) {
+    if (!state.open || !(element instanceof Element) || !element.isConnected) {
       overlay.classList.remove("is-visible");
       return;
     }
@@ -1601,6 +1657,15 @@
 
   function activatePreviewHoverForLine(line) {
     const nextElement = line >= 0 ? getPreviewElementForHtmlLine(line) : null;
+    activatePreviewHoverForElement(nextElement);
+  }
+
+  function activatePreviewHoverForLayerPath(layerPath) {
+    const nextElement = layerPath ? getPreviewElementForLayerPath(layerPath) : null;
+    activatePreviewHoverForElement(nextElement);
+  }
+
+  function activatePreviewHoverForElement(nextElement) {
     const previousElement = state.activePreviewHoverElement instanceof Element ? state.activePreviewHoverElement : null;
 
     if (previousElement === nextElement) {
@@ -1633,9 +1698,29 @@
     syncHtmlLayerDecorations();
   }
 
+  function setOverridesHoveredPath(layerPath) {
+    const nextPath = String(layerPath || "").trim();
+
+    if (state.hoveredOverridePath === nextPath) {
+      schedulePreviewHoverOverlaySync();
+      return;
+    }
+
+    state.hoveredOverridePath = nextPath;
+    activatePreviewHoverForLayerPath(nextPath);
+    syncOverridesLayerDecorations();
+  }
+
   function syncPreviewLayerStateFromDom() {
-    if (state.mode !== "html") {
+    if (!state.open) {
+      return;
+    }
+
+    const root = getPreviewRenderRoot();
+
+    if (!(root instanceof Element)) {
       state.previewHoveredHtmlLine = -1;
+      state.previewHoveredLayerPath = "";
       state.selectedHtmlLine = -1;
       syncHtmlLayerDecorations();
       syncOverridesLineNumbers();
@@ -1643,20 +1728,22 @@
       return;
     }
 
-    const root = getPreviewRenderRoot();
-
-    if (!(root instanceof Element)) {
-      return;
-    }
-
     const hoveredElement = root.querySelector('[data-ux-layer-hovered]:not([data-ux-layer-hovered="false"])');
     const selectedElement = root.querySelector('[data-ux-layer-selected]:not([data-ux-layer-selected="false"])');
     const nextPreviewHoverLine = hoveredElement instanceof Element ? getHtmlLineForPreviewElement(hoveredElement) : -1;
+    const nextPreviewHoverPath = hoveredElement instanceof Element ? getPreviewLayerPathForElement(hoveredElement) : "";
     const nextSelectedLine = selectedElement instanceof Element ? getHtmlLineForPreviewElement(selectedElement) : -1;
+    const nextHtmlHoverLine = state.mode === "html" ? nextPreviewHoverLine : -1;
+    const nextHtmlSelectedLine = state.mode === "html" ? nextSelectedLine : -1;
 
-    if (nextPreviewHoverLine !== state.previewHoveredHtmlLine || nextSelectedLine !== state.selectedHtmlLine) {
-      state.previewHoveredHtmlLine = nextPreviewHoverLine;
-      state.selectedHtmlLine = nextSelectedLine;
+    if (
+      nextHtmlHoverLine !== state.previewHoveredHtmlLine ||
+      nextPreviewHoverPath !== state.previewHoveredLayerPath ||
+      nextHtmlSelectedLine !== state.selectedHtmlLine
+    ) {
+      state.previewHoveredHtmlLine = nextHtmlHoverLine;
+      state.previewHoveredLayerPath = nextPreviewHoverPath;
+      state.selectedHtmlLine = nextHtmlSelectedLine;
       syncLineNumbers();
       syncHtmlLayerDecorations();
       syncOverridesLineNumbers();
@@ -1982,8 +2069,17 @@
     }
 
     const selectedLines = getSelectedOverrideLines();
+    const hoverPath = state.hoveredOverridePath || state.previewHoveredLayerPath;
+    const hoverRange = hoverPath ? getJsonKeyBlockLineRange(state.overridesValue, hoverPath) : null;
+    const hoverLines = new Set();
 
-    if (!selectedLines.size) {
+    if (hoverRange) {
+      for (let line = hoverRange.start; line <= hoverRange.end; line += 1) {
+        hoverLines.add(line);
+      }
+    }
+
+    if (!selectedLines.size && !hoverLines.size) {
       rowHighlights.innerHTML = "";
       return;
     }
@@ -1992,11 +2088,12 @@
     const lineHeight = getEditorMetric(editor, "line-height", 18.6);
     const scrollTop = editor.scrollTop || 0;
 
-    rowHighlights.innerHTML = Array.from(selectedLines)
+    rowHighlights.innerHTML = Array.from(new Set([...hoverLines, ...selectedLines]))
       .sort((first, second) => first - second)
       .map((line) => {
         const top = paddingTop + line * lineHeight - scrollTop;
-        return `<div class="preview-dev-panel__row-highlight is-selected" style="top: ${top}px; height: ${lineHeight}px;"></div>`;
+        const selectedClass = selectedLines.has(line) ? " is-selected" : "";
+        return `<div class="preview-dev-panel__row-highlight${selectedClass}" style="top: ${top}px; height: ${lineHeight}px;"></div>`;
       })
       .join("");
   }
@@ -2753,16 +2850,23 @@
   }, true);
 
   panel.addEventListener("pointermove", (event) => {
-    if (state.mode !== "html") {
-      return;
-    }
-
     const target = event.target;
 
-    if (!(target instanceof Element) || !target.closest("[data-preview-dev-body]")) {
+    if (!(target instanceof Element)) {
       return;
     }
 
+    if (target.closest("[data-preview-dev-overrides-body]")) {
+      setCodeHoveredLine(-1);
+      setOverridesHoveredPath(getOverrideLayerPathFromPointer(event));
+      return;
+    }
+
+    if (state.mode !== "html" || !target.closest("[data-preview-dev-body]")) {
+      return;
+    }
+
+    setOverridesHoveredPath("");
     setCodeHoveredLine(getHtmlLayerLineFromPointer(event));
   });
 
@@ -2774,6 +2878,7 @@
     }
 
     setCodeHoveredLine(-1);
+    setOverridesHoveredPath("");
   });
 
   panel.addEventListener("keyup", (event) => {
@@ -2831,21 +2936,24 @@
   });
 
   document.addEventListener("mouseover", (event) => {
-    if (state.mode !== "html" || !state.open || panel.contains(event.target)) {
+    if (!state.open || panel.contains(event.target)) {
       return;
     }
 
     const element = getClosestPreviewLayerElement(event.target);
     const line = getHtmlLineForPreviewElement(element);
+    const path = getPreviewLayerPathForElement(element);
 
-    if (line >= 0 && line !== state.previewHoveredHtmlLine) {
-      state.previewHoveredHtmlLine = line;
+    if (path !== state.previewHoveredLayerPath || (state.mode === "html" && line >= 0 && line !== state.previewHoveredHtmlLine)) {
+      state.previewHoveredLayerPath = path;
+      state.previewHoveredHtmlLine = state.mode === "html" ? line : -1;
       syncHtmlLayerDecorations();
+      syncOverridesLayerDecorations();
     }
   });
 
   document.addEventListener("mouseout", (event) => {
-    if (state.mode !== "html" || !state.open || panel.contains(event.target)) {
+    if (!state.open || panel.contains(event.target)) {
       return;
     }
 
@@ -2861,9 +2969,11 @@
       return;
     }
 
-    if (state.previewHoveredHtmlLine !== -1) {
+    if (state.previewHoveredHtmlLine !== -1 || state.previewHoveredLayerPath) {
       state.previewHoveredHtmlLine = -1;
+      state.previewHoveredLayerPath = "";
       syncHtmlLayerDecorations();
+      syncOverridesLayerDecorations();
     }
   });
 
