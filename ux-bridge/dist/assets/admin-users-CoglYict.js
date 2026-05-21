@@ -1,4 +1,4 @@
-(async()=>{let e=document.querySelector(`[data-admin-users-app]`),t=document.querySelector(`[data-admin-hero-actions]`),n=0,r=0;if(!e)return;let i={loading:!0,users:[],roles:[],rolePermissions:{},originalRolePermissions:{},defaultRolePermissions:{},permissionCatalog:[],currentUserEmail:``,status:``,tone:`neutral`,toastClosing:!1,busyEmail:``,openMenuEmail:``,openMenuPosition:null,editingRoleEmail:``,pendingRoleByEmail:{},sortKey:`createdAt`,sortDirection:`desc`,exportingRecovery:!1,restoringRecovery:!1,recoveryModalOpen:!1,recoverySnapshotText:``,recentAuditEvents:[],recentOperationalEvents:[],activeTab:`users`,savingRolePermissions:!1,recoveryMenuOpen:!1,searchQuery:``,selectedUserEmails:[],bulkDeletingUsers:!1};function a(e){return String(e??``).replaceAll(`&`,`&amp;`).replaceAll(`<`,`&lt;`).replaceAll(`>`,`&gt;`).replaceAll(`"`,`&quot;`)}function o(e){return String(e??``).replace(/[.*+?^${}()|[\]\\]/g,`\\$&`)}function s(e,t){let n=String(e??``),r=String(t||``).trim();if(!r)return a(n);let i=RegExp(`(${o(r)})`,`gi`);return a(n).replace(i,`<mark class="bridge-table-search__highlight">$1</mark>`)}function c(e,t){let n=String(t||``).trim().toLowerCase();return n?[e.fullName,e.email,e.role].map(e=>String(e||``).toLowerCase()).some(e=>e.includes(n)):!0}function l(t=null,n=null){window.requestAnimationFrame(()=>{let r=e.querySelector(`[data-admin-user-search]`);r instanceof HTMLInputElement&&(r.focus(),typeof t==`number`&&typeof n==`number`&&r.setSelectionRange(t,n))})}function u(e){let t=String(e||``).trim().split(/\s+/).filter(Boolean);return t.length?t.slice(0,2).map(e=>e[0]?.toUpperCase()||``).join(``):`U`}function d(e){let t=Number(e);return!Number.isFinite(t)||t<=0?`$0.00`:t<.01?`$${t.toFixed(4)}`:`$${t.toFixed(2)}`}function f(){let e=new Set(i.users.map(e=>e.email));return i.selectedUserEmails.filter(t=>e.has(t))}function p(e=``){return f().includes(e)}function m(e,t){let n=new Set(f());t?n.add(e):n.delete(e),i.selectedUserEmails=Array.from(n)}function h(){i.selectedUserEmails=f()}function g(e){let t=e&&typeof e==`object`?e:{};return i.roles.reduce((e,n)=>(e[n]=Array.isArray(t[n])?[...new Set(t[n].map(e=>String(e||``).trim()).filter(Boolean))]:[],e),{})}function _(e,t){return Array.isArray(i.rolePermissions[e])&&i.rolePermissions[e].includes(t)}function v(e,t,n){let r=g(i.rolePermissions),a=new Set(r[e]||[]);n?a.add(t):a.delete(t),r[e]=Array.from(a),i.rolePermissions=r}function y(e,t){return i.roles.every(n=>{let r=Array.isArray(e?.[n])?[...e[n]].sort():[],i=Array.isArray(t?.[n])?[...t[n]].sort():[];return r.length===i.length?r.every((e,t)=>e===i[t]):!1})}function b(){return!y(i.rolePermissions,i.originalRolePermissions)}function x(e){let t=(x.canvas||=document.createElement(`canvas`)).getContext(`2d`);if(!t)return 148;t.font=`700 15px Inter, "Segoe UI", sans-serif`;let n=t.measureText(String(e||``)).width;return Math.max(112,Math.ceil(n+58))}function S(e){return e===`error`?`
+(async()=>{let e=document.querySelector(`[data-admin-users-app]`),t=document.querySelector(`[data-admin-hero-actions]`),n=0,r=0;if(!e)return;let i={loading:!0,users:[],roles:[],rolePermissions:{},originalRolePermissions:{},defaultRolePermissions:{},permissionCatalog:[],currentUserEmail:``,status:``,tone:`neutral`,toastClosing:!1,busyEmail:``,openMenuEmail:``,openMenuPosition:null,editingRoleEmail:``,pendingRoleByEmail:{},sortKey:`createdAt`,sortDirection:`desc`,exportingRecovery:!1,restoringRecovery:!1,recoveryModalOpen:!1,recoverySnapshotText:``,recentAuditEvents:[],recentOperationalEvents:[],activeTab:`users`,savingRolePermissions:!1,recoveryMenuOpen:!1,searchQuery:``,selectedUserEmails:[],bulkDeletingUsers:!1};function a(e){return String(e??``).replaceAll(`&`,`&amp;`).replaceAll(`<`,`&lt;`).replaceAll(`>`,`&gt;`).replaceAll(`"`,`&quot;`)}function o(e){return String(e??``).replace(/[.*+?^${}()|[\]\\]/g,`\\$&`)}function s(e,t){let n=String(e??``),r=String(t||``).trim();if(!r)return a(n);let i=RegExp(`(${o(r)})`,`gi`);return a(n).replace(i,`<mark class="bridge-table-search__highlight">$1</mark>`)}function c(e,t){let n=String(t||``).trim().toLowerCase();return n?[e.fullName,e.email,e.role].map(e=>String(e||``).toLowerCase()).some(e=>e.includes(n)):!0}function l(t=null,n=null){window.requestAnimationFrame(()=>{let r=e.querySelector(`[data-admin-user-search]`);r instanceof HTMLInputElement&&(r.focus(),typeof t==`number`&&typeof n==`number`&&r.setSelectionRange(t,n))})}function u(e){let t=String(e||``).trim().split(/\s+/).filter(Boolean);return t.length?t.slice(0,2).map(e=>e[0]?.toUpperCase()||``).join(``):`U`}function d(){let e=new Set(i.users.map(e=>e.email));return i.selectedUserEmails.filter(t=>e.has(t))}function f(e=``){return d().includes(e)}function p(e,t){let n=new Set(d());t?n.add(e):n.delete(e),i.selectedUserEmails=Array.from(n)}function m(){i.selectedUserEmails=d()}function h(e){let t=e&&typeof e==`object`?e:{};return i.roles.reduce((e,n)=>(e[n]=Array.isArray(t[n])?[...new Set(t[n].map(e=>String(e||``).trim()).filter(Boolean))]:[],e),{})}function g(e,t){return Array.isArray(i.rolePermissions[e])&&i.rolePermissions[e].includes(t)}function _(e,t,n){let r=h(i.rolePermissions),a=new Set(r[e]||[]);n?a.add(t):a.delete(t),r[e]=Array.from(a),i.rolePermissions=r}function v(e,t){return i.roles.every(n=>{let r=Array.isArray(e?.[n])?[...e[n]].sort():[],i=Array.isArray(t?.[n])?[...t[n]].sort():[];return r.length===i.length?r.every((e,t)=>e===i[t]):!1})}function y(){return!v(i.rolePermissions,i.originalRolePermissions)}function b(e){let t=(b.canvas||=document.createElement(`canvas`)).getContext(`2d`);if(!t)return 148;t.font=`700 15px Inter, "Segoe UI", sans-serif`;let n=t.measureText(String(e||``)).width;return Math.max(112,Math.ceil(n+58))}function x(e){return e===`error`?`
         <span class="bridge-projects__toast-icon" aria-hidden="true">
           <svg viewBox="0 0 24 24" focusable="false">
             <circle cx="12" cy="12" r="9"></circle>
@@ -13,7 +13,7 @@
           <path d="M8.2 12.4l2.5 2.5 5.1-5.4"></path>
         </svg>
       </span>
-    `}function C(){let e=i.sortDirection===`desc`?-1:1,t=[...i.users];return t.sort((t,n)=>{let r=0;return i.sortKey===`role`?(r=String(t.role||``).localeCompare(String(n.role||``),void 0,{sensitivity:`base`}),r||=String(t.fullName||``).localeCompare(String(n.fullName||``),void 0,{sensitivity:`base`})):i.sortKey===`createdAt`?(r=Number(t.createdAt||0)-Number(n.createdAt||0),r||=String(t.fullName||``).localeCompare(String(n.fullName||``),void 0,{sensitivity:`base`})):(r=String(t.fullName||``).localeCompare(String(n.fullName||``),void 0,{sensitivity:`base`}),r||=String(t.email||``).localeCompare(String(n.email||``),void 0,{sensitivity:`base`})),r*e}),t}function w(e){return i.sortKey===e?i.sortDirection===`desc`?`
+    `}function S(){let e=i.sortDirection===`desc`?-1:1,t=[...i.users];return t.sort((t,n)=>{let r=0;return i.sortKey===`role`?(r=String(t.role||``).localeCompare(String(n.role||``),void 0,{sensitivity:`base`}),r||=String(t.fullName||``).localeCompare(String(n.fullName||``),void 0,{sensitivity:`base`})):i.sortKey===`createdAt`?(r=Number(t.createdAt||0)-Number(n.createdAt||0),r||=String(t.fullName||``).localeCompare(String(n.fullName||``),void 0,{sensitivity:`base`})):(r=String(t.fullName||``).localeCompare(String(n.fullName||``),void 0,{sensitivity:`base`}),r||=String(t.email||``).localeCompare(String(n.email||``),void 0,{sensitivity:`base`})),r*e}),t}function C(e){return i.sortKey===e?i.sortDirection===`desc`?`
         <span class="bridge-admin-table__sort-arrow" aria-hidden="true">
           <svg viewBox="0 0 16 16" focusable="false">
             <path d="M8 3.25v9.5"></path>
@@ -35,7 +35,7 @@
             <path d="M5.5 10.25 8 12.75l2.5-2.5"></path>
           </svg>
         </span>
-      `}function T(){if(window.clearTimeout(n),window.clearTimeout(r),!i.status){i.toastClosing=!1;return}i.toastClosing=!0,D(),r=window.setTimeout(()=>{i.status=``,i.tone=`neutral`,i.toastClosing=!1,D()},260)}function E(e=``,t=`neutral`){if(window.clearTimeout(n),window.clearTimeout(r),!e){T();return}i.status=e,i.tone=t,i.toastClosing=!1,n=window.setTimeout(()=>{T()},4e3),D()}function D(){if(i.loading){e.innerHTML=`
+      `}function w(){if(window.clearTimeout(n),window.clearTimeout(r),!i.status){i.toastClosing=!1;return}i.toastClosing=!0,E(),r=window.setTimeout(()=>{i.status=``,i.tone=`neutral`,i.toastClosing=!1,E()},260)}function T(e=``,t=`neutral`){if(window.clearTimeout(n),window.clearTimeout(r),!e){w();return}i.status=e,i.tone=t,i.toastClosing=!1,n=window.setTimeout(()=>{w()},4e3),E()}function E(){if(i.loading){e.innerHTML=`
         <article class="bridge-admin__loading">
           <p>Loading users…</p>
         </article>
@@ -66,13 +66,13 @@
         </div>
       `);let n=i.status?`
           <div class="bridge-projects__toast${i.tone===`error`?` bridge-projects__toast--error`:``}${i.toastClosing?` is-closing`:``}" role="status" aria-live="polite">
-            ${S(i.tone)}
+            ${x(i.tone)}
             <span class="bridge-projects__toast-message">${a(i.status)}</span>
             <button class="bridge-projects__toast-dismiss" type="button" aria-label="Dismiss notification" data-dismiss-status>
               <span aria-hidden="true">×</span>
             </button>
           </div>
-        `:``,r=C().filter(e=>c(e,i.searchQuery)),o=i.users.length>5,l=i.users.length>5,m=f(),h=m.length,g=r.filter(e=>e.email!==i.currentUserEmail).map(e=>e.email),v=g.length?g.every(e=>m.includes(e)):!1,y=o?`
+        `:``,r=S().filter(e=>c(e,i.searchQuery)),o=i.users.length>5,l=i.users.length>5,p=d(),m=p.length,h=r.filter(e=>e.email!==i.currentUserEmail).map(e=>e.email),_=h.length?h.every(e=>p.includes(e)):!1,v=o?`
           <div class="bridge-table-search-bar">
             <label class="bridge-table-search">
               <span class="bridge-table-search__icon" aria-hidden="true">
@@ -91,16 +91,16 @@
               />
             </label>
           </div>
-        `:``,T=l&&h?`
+        `:``,w=l&&m?`
             <div class="bridge-table-bulk-bar">
-              <span class="bridge-table-bulk-bar__count">${h} selected</span>
+              <span class="bridge-table-bulk-bar__count">${m} selected</span>
               <div class="bridge-table-bulk-bar__actions">
                 <button class="bridge-table-bulk-bar__button bridge-table-bulk-bar__button--danger" type="button" data-admin-bulk-delete ${i.bulkDeletingUsers?`disabled`:``}>
                   ${i.bulkDeletingUsers?`Deleting...`:`Delete`}
                 </button>
               </div>
             </div>
-          `:``,E=r.length&&r.map(e=>{let t=i.busyEmail===e.email,n=e.email===i.currentUserEmail,r=u(e.fullName),o=i.editingRoleEmail===e.email,c=i.pendingRoleByEmail[e.email]||e.role,f=x(c),m=i.roles.map(e=>`<option value="${a(e)}" ${e===c?`selected`:``}>${a(e)}</option>`).join(``),h=e.avatarColor?` style="--avatar-bg:${a(e.avatarColor)}"`:``,g=e.avatarUrl?`<span class="bridge-admin-table__avatar has-photo"${h}><img src="${a(e.avatarUrl)}" alt="" /></span>`:`<span class="bridge-admin-table__avatar" aria-hidden="true"${h}>${a(r)}</span>`,_=e.email!==i.currentUserEmail;return`
+          `:``,T=r.length&&r.map(e=>{let t=i.busyEmail===e.email,n=e.email===i.currentUserEmail,r=u(e.fullName),o=i.editingRoleEmail===e.email,c=i.pendingRoleByEmail[e.email]||e.role,d=b(c),p=i.roles.map(e=>`<option value="${a(e)}" ${e===c?`selected`:``}>${a(e)}</option>`).join(``),m=e.avatarColor?` style="--avatar-bg:${a(e.avatarColor)}"`:``,h=e.avatarUrl?`<span class="bridge-admin-table__avatar has-photo"${m}><img src="${a(e.avatarUrl)}" alt="" /></span>`:`<span class="bridge-admin-table__avatar" aria-hidden="true"${m}>${a(r)}</span>`,g=e.email!==i.currentUserEmail;return`
           <tr
             class="bridge-admin-table__row"
             data-user-email="${a(e.email)}"
@@ -116,8 +116,8 @@
                           type="checkbox"
                           aria-label="Select ${a(e.fullName)}"
                           data-admin-user-select="${a(e.email)}"
-                          ${p(e.email)?`checked`:``}
-                          ${_?``:`disabled`}
+                          ${f(e.email)?`checked`:``}
+                          ${g?``:`disabled`}
                         />
                         <span class="bridge-table-select__control" aria-hidden="true"></span>
                       </label>
@@ -125,7 +125,7 @@
                   `:``}
             <td class="bridge-admin-table__user-cell">
               <div class="bridge-admin-table__user">
-                ${g}
+                ${h}
                 <div class="bridge-admin-table__identity">
                   <div class="bridge-admin-table__identity-top">
                     <strong><a class="bridge-admin-table__profile-link" href="/profile.html?email=${encodeURIComponent(e.email)}">${s(e.fullName,i.searchQuery)}</a></strong>
@@ -136,7 +136,7 @@
               </div>
             </td>
             <td class="bridge-admin-table__role-cell">
-              <div class="bridge-admin-table__role" style="--role-control-width:${f}px;">
+              <div class="bridge-admin-table__role" style="--role-control-width:${d}px;">
                 <div class="bridge-admin-table__role-display"${o?` hidden`:``}>
                   <span class="bridge-admin-table__role-pill">${s(e.role,i.searchQuery)}</span>
                   <button
@@ -155,7 +155,7 @@
                 </div>
                 <div class="bridge-admin-table__role-editor"${o?``:` hidden`}>
                   <select data-role-select="${a(e.email)}" ${t?`disabled`:``}>
-                    ${m}
+                    ${p}
                   </select>
                   <button
                     class="bridge-admin-table__role-save"
@@ -170,15 +170,6 @@
                   </button>
                 </div>
               </div>
-            </td>
-            <td class="bridge-admin-table__ai-cell">
-              <span
-                class="bridge-admin-table__ai-cost"
-                data-tooltip="Estimated total AI cost: ${a(d(e.aiUsage?.totalEstimatedCostUsd||0))}"
-                tabindex="0"
-              >
-                ${a(d(e.aiUsage?.currentMonthEstimatedCostUsd||0))}
-              </span>
             </td>
             <td class="bridge-admin-table__actions-cell">
               <div class="bridge-projects-table__actions bridge-admin-table__actions" data-admin-actions>
@@ -201,7 +192,7 @@
             <div class="bridge-table-search__empty">No users match your search.</div>
           </td>
         </tr>
-      `,D=i.openMenuEmail?i.users.find(e=>e.email===i.openMenuEmail):null,O=D&&i.openMenuPosition?`
+      `,E=i.openMenuEmail?i.users.find(e=>e.email===i.openMenuEmail):null,D=E&&i.openMenuPosition?`
             <div
               class="bridge-projects-table__menu bridge-admin__floating-menu"
               role="menu"
@@ -212,8 +203,8 @@
                 type="button"
                 role="menuitem"
                 data-action="reset-password"
-                data-email="${a(D.email)}"
-                ${i.busyEmail===D.email?`disabled`:``}
+                data-email="${a(E.email)}"
+                ${i.busyEmail===E.email?`disabled`:``}
               >
                 Reset password
               </button>
@@ -222,13 +213,13 @@
                 type="button"
                 role="menuitem"
                 data-action="delete-user"
-                data-email="${a(D.email)}"
-                ${i.busyEmail===D.email||D.email===i.currentUserEmail?`disabled`:``}
+                data-email="${a(E.email)}"
+                ${i.busyEmail===E.email||E.email===i.currentUserEmail?`disabled`:``}
               >
                 Delete User
               </button>
             </div>
-          `:``,k=i.recoveryModalOpen?`
+          `:``,O=i.recoveryModalOpen?`
           <div class="bridge-admin__recovery-modal" data-recovery-modal>
             <div class="bridge-admin__recovery-backdrop" data-close-recovery-modal></div>
             <div class="bridge-admin__recovery-dialog" role="dialog" aria-modal="true" aria-labelledby="admin-recovery-title">
@@ -252,7 +243,7 @@
               </div>
             </div>
           </div>
-        `:``,A=i.recentAuditEvents.length?i.recentAuditEvents.map(e=>`
+        `:``,k=i.recentAuditEvents.length?i.recentAuditEvents.map(e=>`
               <li class="bridge-admin__event-item">
                 <div class="bridge-admin__event-main">
                   <strong>${a(e.action||`event`)}</strong>
@@ -263,7 +254,7 @@
                   <span>${new Date(Number(e.createdAt||0)).toLocaleString()}</span>
                 </div>
               </li>
-            `).join(``):`<li class="bridge-admin__event-empty">No audit events yet.</li>`,j=i.recentOperationalEvents.length?i.recentOperationalEvents.map(e=>`
+            `).join(``):`<li class="bridge-admin__event-empty">No audit events yet.</li>`,A=i.recentOperationalEvents.length?i.recentOperationalEvents.map(e=>`
               <li class="bridge-admin__event-item">
                 <div class="bridge-admin__event-main">
                   <strong>${a(e.name||`event`)}</strong>
@@ -274,7 +265,7 @@
                   <span>${new Date(Number(e.createdAt||0)).toLocaleString()}</span>
                 </div>
               </li>
-            `).join(``):`<li class="bridge-admin__event-empty">No operational events yet.</li>`,M=`
+            `).join(``):`<li class="bridge-admin__event-empty">No operational events yet.</li>`,j=`
       <div class="bridge-admin__tabs" role="tablist" aria-label="Admin sections">
         <button class="bridge-admin__tab${i.activeTab===`users`?` is-active`:``}" type="button" role="tab" aria-selected="${i.activeTab===`users`?`true`:`false`}" data-admin-tab="users">
           Users
@@ -289,10 +280,10 @@
           System Errors
         </button>
       </div>
-    `,N=`
+    `,M=`
       <div class="bridge-admin__users-stack">
-        ${y}
-        ${T}
+        ${v}
+        ${w}
         <div class="bridge-admin__table-shell">
           <table class="bridge-admin-table">
             <thead>
@@ -304,7 +295,7 @@
                               type="checkbox"
                               aria-label="Select all visible users"
                               data-admin-user-select-all
-                              ${v?`checked`:``}
+                              ${_?`checked`:``}
                             />
                             <span class="bridge-table-select__control" aria-hidden="true"></span>
                           </label>
@@ -313,38 +304,37 @@
                 <th>
                   <button class="bridge-admin-table__sort-button" type="button" data-sort-key="fullName">
                     <span>Users (${r.length})</span>
-                    ${w(`fullName`)}
+                    ${C(`fullName`)}
                   </button>
                 </th>
                 <th>
                   <button class="bridge-admin-table__sort-button" type="button" data-sort-key="role">
                     <span>Role</span>
-                    ${w(`role`)}
+                    ${C(`role`)}
                   </button>
                 </th>
-                <th>AI / Month</th>
                 <th>Actions</th>
               </tr>
             </thead>
-            <tbody>${E}</tbody>
+            <tbody>${T}</tbody>
           </table>
         </div>
       </div>
-    `,P=`
+    `,N=`
       <section class="bridge-admin__observability-card">
         <div class="bridge-admin__observability-header">
           <p class="bridge-admin__count">Log</p>
           <p class="bridge-admin__copy">Sensitive admin, profile, and project actions.</p>
         </div>
-        <ul class="bridge-admin__event-list">${A}</ul>
+        <ul class="bridge-admin__event-list">${k}</ul>
       </section>
-    `,F=i.permissionCatalog.length?i.permissionCatalog.map(e=>{let t=i.roles.map(t=>`
+    `,P=i.permissionCatalog.length?i.permissionCatalog.map(e=>{let t=i.roles.map(t=>`
                   <label class="bridge-admin-permissions__toggle">
                     <input
                       type="checkbox"
                       data-role-permission-toggle="${a(t)}"
                       data-permission-key="${a(e.key)}"
-                      ${_(t,e.key)?`checked`:``}
+                      ${g(t,e.key)?`checked`:``}
                       ${i.savingRolePermissions?`disabled`:``}
                     />
                     <span class="bridge-admin-permissions__toggle-control" aria-hidden="true"></span>
@@ -361,7 +351,7 @@
                   ${t}
                 </div>
               </article>
-            `}).join(``):`<div class="bridge-admin__event-empty">No permissions available yet.</div>`,I=`
+            `}).join(``):`<div class="bridge-admin__event-empty">No permissions available yet.</div>`,F=`
       <section class="bridge-admin__observability-card bridge-admin-permissions">
         <div class="bridge-admin__observability-header bridge-admin-permissions__header">
           <div>
@@ -372,38 +362,38 @@
             <button class="bridge-admin-permissions__button bridge-admin-permissions__button--secondary" type="button" data-reset-role-permissions ${i.savingRolePermissions?`disabled`:``}>
               Reset to defaults
             </button>
-            <button class="bridge-admin-permissions__button" type="button" data-save-role-permissions ${!b()||i.savingRolePermissions?`disabled`:``}>
+            <button class="bridge-admin-permissions__button" type="button" data-save-role-permissions ${!y()||i.savingRolePermissions?`disabled`:``}>
               ${i.savingRolePermissions?`Saving…`:`Save permissions`}
             </button>
           </div>
         </div>
         <div class="bridge-admin-permissions__list">
-          ${F}
+          ${P}
         </div>
       </section>
-    `,L=`
+    `,I=`
       <section class="bridge-admin__observability-card">
         <div class="bridge-admin__observability-header">
           <p class="bridge-admin__count">System Errors</p>
           <p class="bridge-admin__copy">Recent application errors and warnings.</p>
         </div>
-        <ul class="bridge-admin__event-list">${j}</ul>
+        <ul class="bridge-admin__event-list">${A}</ul>
       </section>
     `;e.innerHTML=`
-      ${M}
+      ${j}
       ${n}
       <div class="bridge-admin__panel${i.activeTab===`users`?` is-active`:``}" data-admin-panel="users"${i.activeTab===`users`?``:` hidden`}>
-        ${N}
+        ${M}
       </div>
       <div class="bridge-admin__panel${i.activeTab===`permissions`?` is-active`:``}" data-admin-panel="permissions"${i.activeTab===`permissions`?``:` hidden`}>
-        ${I}
+        ${F}
       </div>
       <div class="bridge-admin__panel${i.activeTab===`log`?` is-active`:``}" data-admin-panel="log"${i.activeTab===`log`?``:` hidden`}>
-        ${P}
+        ${N}
       </div>
       <div class="bridge-admin__panel${i.activeTab===`system-errors`?` is-active`:``}" data-admin-panel="system-errors"${i.activeTab===`system-errors`?``:` hidden`}>
-        ${L}
+        ${I}
       </div>
+      ${D}
       ${O}
-      ${k}
-    `}async function O(){i.loading=!0,D();let e=await fetch(`/api/admin-users`,{method:`GET`,credentials:`include`,cache:`no-store`}),t=await e.json().catch(()=>({}));if(!e.ok||!t?.ok)throw Error(t?.error||`Unable to load users.`);i.users=Array.isArray(t.users)?t.users:[],h(),i.roles=Array.isArray(t.roles)?t.roles:[],i.permissionCatalog=Array.isArray(t.permissionCatalog)?t.permissionCatalog:[],i.defaultRolePermissions=g(t.defaultRolePermissions),i.rolePermissions=g(t.rolePermissions),i.originalRolePermissions=g(t.rolePermissions),i.currentUserEmail=t.currentUserEmail||``,i.recentAuditEvents=Array.isArray(t.recentAuditEvents)?t.recentAuditEvents:[],i.recentOperationalEvents=Array.isArray(t.recentOperationalEvents)?t.recentOperationalEvents:[],i.loading=!1,D()}async function k(e,t,n={}){i.busyEmail=t,D();let r=await fetch(`/api/admin-users`,{method:`POST`,credentials:`include`,headers:{"Content-Type":`application/json`},body:JSON.stringify({action:e,email:t,...n})}),a=await r.json().catch(()=>({}));if(i.busyEmail=``,!r.ok||!a?.ok)throw Error(a?.error||`Unable to update user.`);return a}async function A(e,t={}){let n=await fetch(`/api/admin-users`,{method:`POST`,credentials:`include`,headers:{"Content-Type":`application/json`},body:JSON.stringify({action:e,...t})}),r=await n.json().catch(()=>({}));if(!n.ok||!r?.ok)throw Error(r?.error||`Unable to complete the recovery action.`);return r}function j(e){let t=new Blob([JSON.stringify(e,null,2)],{type:`application/json`}),n=URL.createObjectURL(t),r=document.createElement(`a`),i=new Date().toISOString().replaceAll(`:`,`-`);r.href=n,r.download=`ux-bridge-recovery-${i}.json`,r.click(),URL.revokeObjectURL(n)}function M(){!i.openMenuEmail&&!i.openMenuPosition||(i.openMenuEmail=``,i.openMenuPosition=null,D())}function N(){i.recoveryMenuOpen&&(i.recoveryMenuOpen=!1,D())}function P(e,t){let n=e.getBoundingClientRect();i.openMenuEmail=t,i.openMenuPosition={top:Math.max(12,n.top-96-8),left:Math.min(Math.max(12,n.right-196),window.innerWidth-196-12)},D()}async function F(e){if(e.target.closest(`[data-dismiss-status]`))return T(),!0;if(e.target.closest(`[data-open-recovery-modal]`))return N(),i.recoveryModalOpen=!0,D(),!0;if(e.target.closest(`[data-close-recovery-modal]`))return i.recoveryModalOpen=!1,D(),!0;if(e.target.closest(`[data-export-recovery]`)){N(),i.exportingRecovery=!0,D();try{j((await A(`exportRecoveryData`)).snapshot),E(`Recovery snapshot exported.`)}catch(e){E(e instanceof Error?e.message:`Unable to export recovery data.`,`error`)}finally{i.exportingRecovery=!1,D()}return!0}if(e.target.closest(`[data-restore-recovery]`)){i.restoringRecovery=!0,D();try{let e=await A(`restoreRecoveryData`,{snapshot:JSON.parse(i.recoverySnapshotText||`{}`)});i.recoveryModalOpen=!1,i.recoverySnapshotText=``,await O(),E(`Recovery snapshot restored. ${e.restored?.users||0} users, ${e.restored?.projects||0} projects, and ${e.restored?.commentThreads||0} comment threads restored.`)}catch(e){E(e instanceof Error?e.message:`Unable to restore recovery data.`,`error`)}finally{i.restoringRecovery=!1,D()}return!0}let t=e.target.closest(`[data-admin-tab]`);if(t)return i.activeTab=t.getAttribute(`data-admin-tab`)||`users`,M(),N(),D(),!0;if(e.target.closest(`[data-admin-recovery-toggle]`))return i.recoveryMenuOpen=!i.recoveryMenuOpen,M(),D(),!0;let n=e.target.closest(`[data-admin-menu-toggle]`);if(n){let e=n.getAttribute(`data-admin-menu-toggle`)||``;return i.openMenuEmail===e?(M(),!0):(P(n,e),!0)}return!1}e.addEventListener(`change`,async e=>{let t=e.target.closest(`[data-admin-user-select]`);if(t instanceof HTMLInputElement){m(t.getAttribute(`data-admin-user-select`)||``,t.checked),D();return}let n=e.target.closest(`[data-admin-user-select-all]`);if(n instanceof HTMLInputElement){let e=C().filter(e=>c(e,i.searchQuery)).filter(e=>e.email!==i.currentUserEmail).map(e=>e.email),t=new Set(f());n.checked?e.forEach(e=>t.add(e)):e.forEach(e=>t.delete(e)),i.selectedUserEmails=Array.from(t),D();return}let r=e.target.closest(`[data-role-select]`);if(r){let e=r.getAttribute(`data-role-select`);i.pendingRoleByEmail[e]=r.value;return}let a=e.target.closest(`[data-role-permission-toggle]`);if(!(a instanceof HTMLInputElement))return;let o=a.getAttribute(`data-role-permission-toggle`)||``,s=a.getAttribute(`data-permission-key`)||``;!o||!s||(v(o,s,a.checked),D())}),e.addEventListener(`click`,async e=>{if(await F(e))return;let t=e.target.closest(`[data-sort-key]`);if(t){let e=t.getAttribute(`data-sort-key`);if(!e)return;i.sortKey===e?(i.sortDirection===`asc`||(i.sortKey=`createdAt`),i.sortDirection=`desc`):(i.sortKey=e,i.sortDirection=`asc`),D();return}let n=e.target.closest(`[data-role-edit]`);if(n){let e=n.getAttribute(`data-role-edit`),t=i.users.find(t=>t.email===e);if(!e||!t)return;i.editingRoleEmail=e,i.pendingRoleByEmail[e]=i.pendingRoleByEmail[e]||t.role,D();return}let r=e.target.closest(`[data-role-save]`);if(r){let e=r.getAttribute(`data-role-save`),t=i.pendingRoleByEmail[e],n=i.users.find(t=>t.email===e);if(!e||!t||!n)return;if(t===n.role){i.editingRoleEmail=``,delete i.pendingRoleByEmail[e],D();return}try{let n=await k(`updateRole`,e,{role:t});i.users=i.users.map(t=>t.email===e?n.user:t),i.editingRoleEmail=``,delete i.pendingRoleByEmail[e],E(`Updated ${n.user.fullName} to ${n.user.role}.`,`success`)}catch(e){E(e instanceof Error?e.message:`Unable to update role.`,`error`),await O()}return}if(e.target.closest(`[data-admin-bulk-delete]`)){let e=f().filter(e=>e!==i.currentUserEmail);if(!e.length||!window.confirm(`Remove ${e.length} ${e.length===1?`user`:`users`} from UX Bridge? They will lose access immediately.`))return;i.bulkDeletingUsers=!0,D();try{for(let t of e)await k(`deleteUser`,t);let t=new Set(e);i.users=i.users.filter(e=>!t.has(e.email)),i.selectedUserEmails=[],i.bulkDeletingUsers=!1,E(`Removed ${e.length} ${e.length===1?`user`:`users`} from UX Bridge.`,`success`)}catch(e){i.bulkDeletingUsers=!1,E(e instanceof Error?e.message:`Unable to complete action.`,`error`),await O()}return}if(e.target.closest(`[data-save-role-permissions]`)){i.savingRolePermissions=!0,D();try{let e=await k(`updateRolePermissions`,``,{rolePermissions:i.rolePermissions});i.rolePermissions=g(e.rolePermissions),i.originalRolePermissions=g(e.rolePermissions),E(`Role permissions updated.`,`success`)}catch(e){E(e instanceof Error?e.message:`Unable to update role permissions.`,`error`),await O()}finally{i.savingRolePermissions=!1,D()}return}if(e.target.closest(`[data-reset-role-permissions]`)){if(!window.confirm(`Reset all role permissions back to the default UX Bridge policy?`))return;i.savingRolePermissions=!0,D();try{let e=await k(`resetRolePermissions`,``,{});i.rolePermissions=g(e.rolePermissions),i.originalRolePermissions=g(e.rolePermissions),E(`Role permissions reset to defaults.`,`success`)}catch(e){E(e instanceof Error?e.message:`Unable to reset role permissions.`,`error`),await O()}finally{i.savingRolePermissions=!1,D()}return}let a=e.target.closest(`[data-action]`);if(!a){if(e.target.closest(`.bridge-admin-table__profile-link`)||e.target.closest(`[data-admin-actions]`)||e.target.closest(`[data-role-edit]`)||e.target.closest(`[data-role-save]`)||e.target.closest(`[data-role-select]`)||e.target.closest(`.bridge-table-select`))return;let t=e.target.closest(`[data-profile-email]`);if(t){let e=t.getAttribute(`data-profile-email`);e&&(window.location.href=`/profile.html?email=${encodeURIComponent(e)}`)}return}let o=a.getAttribute(`data-action`),s=a.getAttribute(`data-email`);if(s)try{if(o===`reset-password`){M(),E((await k(`resetPassword`,s)).message||`Password reset email sent to ${s}.`,`success`);return}if(o===`delete-user`){if(!window.confirm(`Remove ${s} from UX Bridge? They will lose access immediately.`))return;M(),await k(`deleteUser`,s),i.users=i.users.filter(e=>e.email!==s),E(`Removed ${s} from UX Bridge.`,`success`)}}catch(e){E(e instanceof Error?e.message:`Unable to complete action.`,`error`),await O()}}),t&&t.addEventListener(`click`,async e=>{await F(e)&&(e.preventDefault(),e.stopPropagation())}),e.addEventListener(`input`,e=>{let t=e.target.closest(`[data-admin-user-search]`);if(t instanceof HTMLInputElement){let e=t.selectionStart,n=t.selectionEnd;i.searchQuery=t.value,D(),l(e,n);return}let n=e.target.closest(`[data-recovery-snapshot-input]`);n&&(i.recoverySnapshotText=n.value)}),e.addEventListener(`keydown`,e=>{let t=e.target.closest(`[data-profile-email]`);if(!t||e.target.closest(`.bridge-table-select`)||e.key!==`Enter`&&e.key!==` `||e.target.closest(`[data-admin-actions]`)||e.target.closest(`[data-role-edit]`)||e.target.closest(`[data-role-save]`)||e.target.closest(`[data-role-select]`)||e.target.closest(`.bridge-admin-table__profile-link`))return;e.preventDefault();let n=t.getAttribute(`data-profile-email`);n&&(window.location.href=`/profile.html?email=${encodeURIComponent(n)}`)});try{await O()}catch(e){i.loading=!1,E(e instanceof Error?e.message:`Unable to load users.`,`error`)}document.addEventListener(`click`,e=>{let t=e.target.closest(`[data-admin-actions]`)||e.target.closest(`.bridge-admin__floating-menu`),n=e.target.closest(`[data-admin-hero-actions]`);i.openMenuEmail&&!t&&M(),i.recoveryMenuOpen&&!n&&N()}),window.addEventListener(`resize`,()=>{M(),N()}),window.addEventListener(`scroll`,()=>{M(),N()},!0)})();
+    `}async function D(){i.loading=!0,E();let e=await fetch(`/api/admin-users`,{method:`GET`,credentials:`include`,cache:`no-store`}),t=await e.json().catch(()=>({}));if(!e.ok||!t?.ok)throw Error(t?.error||`Unable to load users.`);i.users=Array.isArray(t.users)?t.users:[],m(),i.roles=Array.isArray(t.roles)?t.roles:[],i.permissionCatalog=Array.isArray(t.permissionCatalog)?t.permissionCatalog:[],i.defaultRolePermissions=h(t.defaultRolePermissions),i.rolePermissions=h(t.rolePermissions),i.originalRolePermissions=h(t.rolePermissions),i.currentUserEmail=t.currentUserEmail||``,i.recentAuditEvents=Array.isArray(t.recentAuditEvents)?t.recentAuditEvents:[],i.recentOperationalEvents=Array.isArray(t.recentOperationalEvents)?t.recentOperationalEvents:[],i.loading=!1,E()}async function O(e,t,n={}){i.busyEmail=t,E();let r=await fetch(`/api/admin-users`,{method:`POST`,credentials:`include`,headers:{"Content-Type":`application/json`},body:JSON.stringify({action:e,email:t,...n})}),a=await r.json().catch(()=>({}));if(i.busyEmail=``,!r.ok||!a?.ok)throw Error(a?.error||`Unable to update user.`);return a}async function k(e,t={}){let n=await fetch(`/api/admin-users`,{method:`POST`,credentials:`include`,headers:{"Content-Type":`application/json`},body:JSON.stringify({action:e,...t})}),r=await n.json().catch(()=>({}));if(!n.ok||!r?.ok)throw Error(r?.error||`Unable to complete the recovery action.`);return r}function A(e){let t=new Blob([JSON.stringify(e,null,2)],{type:`application/json`}),n=URL.createObjectURL(t),r=document.createElement(`a`),i=new Date().toISOString().replaceAll(`:`,`-`);r.href=n,r.download=`ux-bridge-recovery-${i}.json`,r.click(),URL.revokeObjectURL(n)}function j(){!i.openMenuEmail&&!i.openMenuPosition||(i.openMenuEmail=``,i.openMenuPosition=null,E())}function M(){i.recoveryMenuOpen&&(i.recoveryMenuOpen=!1,E())}function N(e,t){let n=e.getBoundingClientRect();i.openMenuEmail=t,i.openMenuPosition={top:Math.max(12,n.top-96-8),left:Math.min(Math.max(12,n.right-196),window.innerWidth-196-12)},E()}async function P(e){if(e.target.closest(`[data-dismiss-status]`))return w(),!0;if(e.target.closest(`[data-open-recovery-modal]`))return M(),i.recoveryModalOpen=!0,E(),!0;if(e.target.closest(`[data-close-recovery-modal]`))return i.recoveryModalOpen=!1,E(),!0;if(e.target.closest(`[data-export-recovery]`)){M(),i.exportingRecovery=!0,E();try{A((await k(`exportRecoveryData`)).snapshot),T(`Recovery snapshot exported.`)}catch(e){T(e instanceof Error?e.message:`Unable to export recovery data.`,`error`)}finally{i.exportingRecovery=!1,E()}return!0}if(e.target.closest(`[data-restore-recovery]`)){i.restoringRecovery=!0,E();try{let e=await k(`restoreRecoveryData`,{snapshot:JSON.parse(i.recoverySnapshotText||`{}`)});i.recoveryModalOpen=!1,i.recoverySnapshotText=``,await D(),T(`Recovery snapshot restored. ${e.restored?.users||0} users, ${e.restored?.projects||0} projects, and ${e.restored?.commentThreads||0} comment threads restored.`)}catch(e){T(e instanceof Error?e.message:`Unable to restore recovery data.`,`error`)}finally{i.restoringRecovery=!1,E()}return!0}let t=e.target.closest(`[data-admin-tab]`);if(t)return i.activeTab=t.getAttribute(`data-admin-tab`)||`users`,j(),M(),E(),!0;if(e.target.closest(`[data-admin-recovery-toggle]`))return i.recoveryMenuOpen=!i.recoveryMenuOpen,j(),E(),!0;let n=e.target.closest(`[data-admin-menu-toggle]`);if(n){let e=n.getAttribute(`data-admin-menu-toggle`)||``;return i.openMenuEmail===e?(j(),!0):(N(n,e),!0)}return!1}e.addEventListener(`change`,async e=>{let t=e.target.closest(`[data-admin-user-select]`);if(t instanceof HTMLInputElement){p(t.getAttribute(`data-admin-user-select`)||``,t.checked),E();return}let n=e.target.closest(`[data-admin-user-select-all]`);if(n instanceof HTMLInputElement){let e=S().filter(e=>c(e,i.searchQuery)).filter(e=>e.email!==i.currentUserEmail).map(e=>e.email),t=new Set(d());n.checked?e.forEach(e=>t.add(e)):e.forEach(e=>t.delete(e)),i.selectedUserEmails=Array.from(t),E();return}let r=e.target.closest(`[data-role-select]`);if(r){let e=r.getAttribute(`data-role-select`);i.pendingRoleByEmail[e]=r.value;return}let a=e.target.closest(`[data-role-permission-toggle]`);if(!(a instanceof HTMLInputElement))return;let o=a.getAttribute(`data-role-permission-toggle`)||``,s=a.getAttribute(`data-permission-key`)||``;!o||!s||(_(o,s,a.checked),E())}),e.addEventListener(`click`,async e=>{if(await P(e))return;let t=e.target.closest(`[data-sort-key]`);if(t){let e=t.getAttribute(`data-sort-key`);if(!e)return;i.sortKey===e?(i.sortDirection===`asc`||(i.sortKey=`createdAt`),i.sortDirection=`desc`):(i.sortKey=e,i.sortDirection=`asc`),E();return}let n=e.target.closest(`[data-role-edit]`);if(n){let e=n.getAttribute(`data-role-edit`),t=i.users.find(t=>t.email===e);if(!e||!t)return;i.editingRoleEmail=e,i.pendingRoleByEmail[e]=i.pendingRoleByEmail[e]||t.role,E();return}let r=e.target.closest(`[data-role-save]`);if(r){let e=r.getAttribute(`data-role-save`),t=i.pendingRoleByEmail[e],n=i.users.find(t=>t.email===e);if(!e||!t||!n)return;if(t===n.role){i.editingRoleEmail=``,delete i.pendingRoleByEmail[e],E();return}try{let n=await O(`updateRole`,e,{role:t});i.users=i.users.map(t=>t.email===e?n.user:t),i.editingRoleEmail=``,delete i.pendingRoleByEmail[e],T(`Updated ${n.user.fullName} to ${n.user.role}.`,`success`)}catch(e){T(e instanceof Error?e.message:`Unable to update role.`,`error`),await D()}return}if(e.target.closest(`[data-admin-bulk-delete]`)){let e=d().filter(e=>e!==i.currentUserEmail);if(!e.length||!window.confirm(`Remove ${e.length} ${e.length===1?`user`:`users`} from UX Bridge? They will lose access immediately.`))return;i.bulkDeletingUsers=!0,E();try{for(let t of e)await O(`deleteUser`,t);let t=new Set(e);i.users=i.users.filter(e=>!t.has(e.email)),i.selectedUserEmails=[],i.bulkDeletingUsers=!1,T(`Removed ${e.length} ${e.length===1?`user`:`users`} from UX Bridge.`,`success`)}catch(e){i.bulkDeletingUsers=!1,T(e instanceof Error?e.message:`Unable to complete action.`,`error`),await D()}return}if(e.target.closest(`[data-save-role-permissions]`)){i.savingRolePermissions=!0,E();try{let e=await O(`updateRolePermissions`,``,{rolePermissions:i.rolePermissions});i.rolePermissions=h(e.rolePermissions),i.originalRolePermissions=h(e.rolePermissions),T(`Role permissions updated.`,`success`)}catch(e){T(e instanceof Error?e.message:`Unable to update role permissions.`,`error`),await D()}finally{i.savingRolePermissions=!1,E()}return}if(e.target.closest(`[data-reset-role-permissions]`)){if(!window.confirm(`Reset all role permissions back to the default UX Bridge policy?`))return;i.savingRolePermissions=!0,E();try{let e=await O(`resetRolePermissions`,``,{});i.rolePermissions=h(e.rolePermissions),i.originalRolePermissions=h(e.rolePermissions),T(`Role permissions reset to defaults.`,`success`)}catch(e){T(e instanceof Error?e.message:`Unable to reset role permissions.`,`error`),await D()}finally{i.savingRolePermissions=!1,E()}return}let a=e.target.closest(`[data-action]`);if(!a){if(e.target.closest(`.bridge-admin-table__profile-link`)||e.target.closest(`[data-admin-actions]`)||e.target.closest(`[data-role-edit]`)||e.target.closest(`[data-role-save]`)||e.target.closest(`[data-role-select]`)||e.target.closest(`.bridge-table-select`))return;let t=e.target.closest(`[data-profile-email]`);if(t){let e=t.getAttribute(`data-profile-email`);e&&(window.location.href=`/profile.html?email=${encodeURIComponent(e)}`)}return}let o=a.getAttribute(`data-action`),s=a.getAttribute(`data-email`);if(s)try{if(o===`reset-password`){j(),T((await O(`resetPassword`,s)).message||`Password reset email sent to ${s}.`,`success`);return}if(o===`delete-user`){if(!window.confirm(`Remove ${s} from UX Bridge? They will lose access immediately.`))return;j(),await O(`deleteUser`,s),i.users=i.users.filter(e=>e.email!==s),T(`Removed ${s} from UX Bridge.`,`success`)}}catch(e){T(e instanceof Error?e.message:`Unable to complete action.`,`error`),await D()}}),t&&t.addEventListener(`click`,async e=>{await P(e)&&(e.preventDefault(),e.stopPropagation())}),e.addEventListener(`input`,e=>{let t=e.target.closest(`[data-admin-user-search]`);if(t instanceof HTMLInputElement){let e=t.selectionStart,n=t.selectionEnd;i.searchQuery=t.value,E(),l(e,n);return}let n=e.target.closest(`[data-recovery-snapshot-input]`);n&&(i.recoverySnapshotText=n.value)}),e.addEventListener(`keydown`,e=>{let t=e.target.closest(`[data-profile-email]`);if(!t||e.target.closest(`.bridge-table-select`)||e.key!==`Enter`&&e.key!==` `||e.target.closest(`[data-admin-actions]`)||e.target.closest(`[data-role-edit]`)||e.target.closest(`[data-role-save]`)||e.target.closest(`[data-role-select]`)||e.target.closest(`.bridge-admin-table__profile-link`))return;e.preventDefault();let n=t.getAttribute(`data-profile-email`);n&&(window.location.href=`/profile.html?email=${encodeURIComponent(n)}`)});try{await D()}catch(e){i.loading=!1,T(e instanceof Error?e.message:`Unable to load users.`,`error`)}document.addEventListener(`click`,e=>{let t=e.target.closest(`[data-admin-actions]`)||e.target.closest(`.bridge-admin__floating-menu`),n=e.target.closest(`[data-admin-hero-actions]`);i.openMenuEmail&&!t&&j(),i.recoveryMenuOpen&&!n&&M()}),window.addEventListener(`resize`,()=>{j(),M()}),window.addEventListener(`scroll`,()=>{j(),M()},!0)})();

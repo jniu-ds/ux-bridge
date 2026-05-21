@@ -758,6 +758,9 @@ function buildDynamicPageLaunchUrl(projectId, pageId) {
 function buildThumbnailUrl(url) {
   const nextUrl = new URL(url, "http://uxbridge.local");
   nextUrl.searchParams.set("table-thumb", "1");
+  nextUrl.searchParams.set("capture", "1");
+  nextUrl.searchParams.set("thumb-viewport", "desktop");
+  nextUrl.searchParams.set("thumb-version", "desktop-first-page-v1");
   return `${nextUrl.pathname}${nextUrl.search}`;
 }
 
