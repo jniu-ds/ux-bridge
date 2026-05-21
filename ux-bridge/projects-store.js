@@ -1815,12 +1815,19 @@ export async function handleProjectsRequest(req) {
       }
     }
     const firstPage = persistedProject.pages[0];
+    const projectCreatedAt = Number(persistedProject.createdAt) || Date.now();
+    const currentMap = normalizeRecentProjectOpenMap(authenticatedUserRecord?.preferences?.projects?.recentOpenById);
+    const recentProjectOpenById = await writeRecentProjectOpenMapForUser(authenticatedUserRecord, {
+      ...currentMap,
+      [persistedProject.id]: Math.max(Number(currentMap[persistedProject.id]) || 0, projectCreatedAt),
+    });
 
     return {
       status: 200,
       payload: {
         ok: true,
         project: await buildProjectPayload(persistedProject, await buildOwnerDirectory(), user, origin),
+        recentProjectOpenById,
         vibeProviders: listVibeProviders(),
         launchUrl: buildDynamicPageLaunchUrl(persistedProject.id, firstPage.id),
         codexContext: createProjectContextPayload(persistedProject),
@@ -1974,12 +1981,19 @@ export async function handleProjectsRequest(req) {
         throw error;
       }
     }
+    const projectCreatedAt = Number(persistedProject.createdAt) || Date.now();
+    const currentMap = normalizeRecentProjectOpenMap(authenticatedUserRecord?.preferences?.projects?.recentOpenById);
+    const recentProjectOpenById = await writeRecentProjectOpenMapForUser(authenticatedUserRecord, {
+      ...currentMap,
+      [persistedProject.id]: Math.max(Number(currentMap[persistedProject.id]) || 0, projectCreatedAt),
+    });
 
     return {
       status: 200,
       payload: {
         ok: true,
         project: await buildProjectPayload(persistedProject, await buildOwnerDirectory(), user, origin),
+        recentProjectOpenById,
         vibeProviders: listVibeProviders(),
       },
     };

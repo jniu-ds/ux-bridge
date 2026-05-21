@@ -280,6 +280,16 @@
     sendRecentProjectOpenToServer(projectId, openedAt, { useBeacon });
   }
 
+  function applyRecentProjectOpenMapFromPayload(payload = {}) {
+    const nextMap = mergeRecentProjectOpenMaps(state.recentProjectOpenById, payload.recentProjectOpenById);
+
+    if (recentProjectOpenMapsEqual(nextMap, state.recentProjectOpenById)) {
+      return;
+    }
+
+    persistRecentProjectOpenMap(nextMap);
+  }
+
   function createEmptyCommentSummary() {
     return {
       totalComments: 0,
@@ -2098,6 +2108,7 @@
       }
 
       state.creating = false;
+      applyRecentProjectOpenMapFromPayload(payload);
       upsertProjectLocally(payload.project);
       spotlightProject(payload.project?.id || "");
       setStatus(`Created ${payload.project?.name || "new project"}.`);
@@ -2297,6 +2308,9 @@
           if (!response.ok || !payload?.ok) {
             throw new Error(payload?.error || "Unable to duplicate selected projects.");
           }
+
+          applyRecentProjectOpenMapFromPayload(payload);
+          upsertProjectLocally(payload.project);
         }
 
         state.bulkDuplicatingProjects = false;
@@ -2480,8 +2494,13 @@
           throw new Error(payload?.error || "Unable to duplicate project.");
         }
 
+        applyRecentProjectOpenMapFromPayload(payload);
+        upsertProjectLocally(payload.project);
         setStatus(`Duplicated ${payload.project?.name || "project"}.`);
-        await loadProjects();
+        render();
+        loadProjects({ background: true }).catch(() => {
+          // Keep the in-place project row when the background refresh fails.
+        });
       } catch (error) {
         setStatus(error instanceof Error ? error.message : "Unable to duplicate project.", "error");
       }
