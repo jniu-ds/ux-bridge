@@ -33,6 +33,10 @@
     codeHistoryLine: -1,
     renderingLivePreview: false,
     previewDomSyncFrame: 0,
+    panelWidth: 300,
+    resizingPanel: false,
+    resizeStartX: 0,
+    resizeStartWidth: 300,
   };
   let previewStateObserver = null;
   let previewHoverOverlay = null;
@@ -50,6 +54,7 @@
     .preview-dev-panel {
       --preview-dev-editor-padding-top: 14px;
       --preview-dev-editor-line-height: 18.6px;
+      --preview-dev-panel-min-width: 300px;
       position: fixed;
       top: 0;
       right: 0;
@@ -58,9 +63,10 @@
       display: grid;
       grid-template-rows: auto minmax(0, 1fr);
       width: var(--preview-dev-panel-width, 300px);
+      min-width: var(--preview-dev-panel-min-width, 300px);
       max-width: var(--preview-dev-panel-width, 300px);
       box-sizing: border-box;
-      overflow: hidden;
+      overflow: visible;
       pointer-events: none;
       opacity: 0;
       transform: translateX(8px);
@@ -70,6 +76,41 @@
       background: #0f172a;
       backdrop-filter: blur(18px);
       box-shadow: -18px 0 38px rgba(2, 6, 23, 0.34);
+    }
+
+    .preview-dev-panel__resize-handle {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: -4px;
+      z-index: 12;
+      width: 8px;
+      cursor: ew-resize;
+      background: transparent;
+      touch-action: none;
+    }
+
+    .preview-dev-panel__resize-handle::after {
+      content: "";
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: 3px;
+      width: 1px;
+      background: transparent;
+      transition: background 0.12s ease;
+    }
+
+    .preview-dev-panel__resize-handle:hover::after,
+    .preview-dev-panel__resize-handle:focus-visible::after,
+    body.preview-dev-resizing .preview-dev-panel__resize-handle::after {
+      background: rgba(164, 41, 236, 0.72);
+    }
+
+    body.preview-dev-resizing,
+    body.preview-dev-resizing * {
+      cursor: ew-resize !important;
+      user-select: none !important;
     }
 
     body.preview-dev-open .preview-dev-panel {
@@ -872,12 +913,15 @@
 
   function syncLayout() {
     const drawerWidth = getActiveDrawerWidth();
-    const panelWidth = Number.parseFloat(window.getComputedStyle(panel).getPropertyValue("--preview-dev-panel-width")) || Math.round(panel.getBoundingClientRect().width) || 300;
+    const panelWidth = Math.max(300, Math.round(Number(state.panelWidth) || 300));
     const sideActions = document.querySelector("[data-side-actions]");
     const sideActionsOffset = state.open ? drawerWidth + panelWidth : drawerWidth;
 
+    state.panelWidth = panelWidth;
+    panel.style.setProperty("--preview-dev-panel-width", `${panelWidth}px`);
     panel.style.right = `${drawerWidth}px`;
     document.body.classList.toggle("preview-dev-open", state.open);
+    document.body.style.setProperty("--preview-dev-panel-width", `${panelWidth}px`);
     document.body.style.setProperty("--bridge-side-actions-offset", state.open ? `${panelWidth}px` : "0px");
     document.body.style.setProperty("--bridge-side-actions-reserved", state.open ? `calc(var(--bridge-side-actions-width, 88px) + ${panelWidth}px)` : "var(--bridge-side-actions-width, 88px)");
 
@@ -886,6 +930,50 @@
     } else if (sideActions instanceof HTMLElement) {
       sideActions.style.removeProperty("right");
     }
+  }
+
+  function getMaxPanelWidth() {
+    const drawerWidth = getActiveDrawerWidth();
+    const sideActionsWidth =
+      Number.parseFloat(window.getComputedStyle(document.body).getPropertyValue("--bridge-side-actions-width")) ||
+      document.querySelector("[data-side-actions]")?.getBoundingClientRect?.().width ||
+      88;
+    const availableWidth = Math.max(300, window.innerWidth - drawerWidth - sideActionsWidth - 64);
+
+    return Math.max(300, Math.floor(availableWidth));
+  }
+
+  function startPanelResize(event) {
+    state.resizingPanel = true;
+    state.resizeStartX = event.clientX;
+    state.resizeStartWidth = Math.max(300, Math.round(Number(state.panelWidth) || 300));
+    document.body.classList.add("preview-dev-resizing");
+
+    try {
+      event.target?.setPointerCapture?.(event.pointerId);
+    } catch {
+      // Pointer capture is a progressive enhancement here.
+    }
+  }
+
+  function updatePanelResize(event) {
+    if (!state.resizingPanel) {
+      return;
+    }
+
+    const delta = state.resizeStartX - event.clientX;
+    state.panelWidth = Math.max(300, Math.min(getMaxPanelWidth(), Math.round(state.resizeStartWidth + delta)));
+    syncLayout();
+    schedulePreviewHoverOverlaySync();
+  }
+
+  function endPanelResize() {
+    if (!state.resizingPanel) {
+      return;
+    }
+
+    state.resizingPanel = false;
+    document.body.classList.remove("preview-dev-resizing");
   }
 
   function syncHighlightScroll() {
@@ -1835,6 +1923,7 @@
         <pre class="preview-dev-panel__code" data-preview-dev-code aria-hidden="true"><code>${highlightCode(state.editorValue, state.mode)}\n</code></pre>
         <textarea class="preview-dev-panel__editor" data-preview-dev-editor spellcheck="false" aria-label="${escapeHtml(state.mode)} editor">${escapeHtml(state.editorValue)}</textarea>
       </div>
+      <div class="preview-dev-panel__resize-handle" data-preview-dev-resize-handle role="separator" aria-orientation="vertical" aria-label="Resize Dev Mode drawer" tabindex="0"></div>
     `;
 
     syncToggleState();
@@ -1948,6 +2037,14 @@
       const layerToggle = target.closest("[data-preview-dev-layer-toggle]");
 
       if (!layerToggle) {
+        const resizeHandle = target.closest("[data-preview-dev-resize-handle]");
+
+        if (resizeHandle) {
+          event.preventDefault();
+          event.stopPropagation();
+          startPanelResize(event);
+        }
+
         return;
       }
 
@@ -1958,6 +2055,13 @@
     },
     true,
   );
+
+  document.addEventListener("pointermove", (event) => {
+    updatePanelResize(event);
+  });
+
+  document.addEventListener("pointerup", endPanelResize);
+  document.addEventListener("pointercancel", endPanelResize);
 
   panel.addEventListener("click", (event) => {
     const target = event.target;
