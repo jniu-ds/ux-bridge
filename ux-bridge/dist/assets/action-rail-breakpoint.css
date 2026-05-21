@@ -1,0 +1,60 @@
+body.breakpoint-specific-active .bridge-project-side-actions {
+  background:
+    linear-gradient(135deg, #a429ec14 0%, #a429ec0f 100%),
+    #ffffffe0 !important;
+  border-left-color: #a429ec2e !important;
+}
+
+body.breakpoint-specific-active .bridge-project-side-actions .bridge-action-rail-button.is-active,
+body.breakpoint-specific-active .bridge-project-side-actions .customizer-drawer-toggle.is-active,
+body.breakpoint-specific-active .bridge-project-side-actions .comments-drawer-toggle.is-active,
+body.breakpoint-specific-active .bridge-project-side-actions .uploads-drawer-toggle.is-active,
+body.breakpoint-specific-active .bridge-project-side-actions .vibe-drawer-toggle.is-active,
+body.breakpoint-specific-active.comments-open .bridge-project-side-actions .comments-drawer-toggle,
+body.breakpoint-specific-active.uploads-open .bridge-project-side-actions .uploads-drawer-toggle,
+body.breakpoint-specific-active.customizer-open .bridge-project-side-actions .customizer-drawer-toggle,
+body.breakpoint-specific-active.vibe-open .bridge-project-side-actions .vibe-drawer-toggle,
+body.breakpoint-specific-active.inspector-open .bridge-project-side-actions .inspector-rail-toggle {
+  color: #a429ec !important;
+  background: #a429ec1a !important;
+  border-color: #a429ec36 !important;
+}
+
+body.breakpoint-specific-active {
+  --preview-inspector-breakpoint-specific-gradient: linear-gradient(135deg, #a429ec 0%, #a429ec 100%) !important;
+}
+
+body.breakpoint-specific-active .inspector-panel.is-breakpoint-specific-active .inspector-panel__inner {
+  background:
+    linear-gradient(135deg, #a429ec14 0%, #a429ec0f 100%),
+    #ffffffe0 !important;
+  border-left-color: #a429ec2e !important;
+}
+
+body.breakpoint-specific-active .preview-inspector__content.preview-inspector__content--breakpoint-specific-active .preview-inspector__breakpoint-scope-card {
+  background:
+    linear-gradient(135deg, #a429ec14 0%, #a429ec0f 100%),
+    #ffffffe0 !important;
+  border-color: #a429ec2e !important;
+}
+
+body.breakpoint-specific-active .preview-inspector__breakpoint-scope-card--toggle-target:hover,
+body.breakpoint-specific-active .preview-inspector__breakpoint-scope-card--toggle-target:focus-visible {
+  background:
+    linear-gradient(135deg, #a429ec14 0%, #a429ec0f 100%),
+    #ffffffe6 !important;
+  border-color: #a429ec2e !important;
+}
+
+body.breakpoint-specific-active .preview-inspector__responsive-split {
+  background:
+    linear-gradient(135deg, #a429ec1a 0%, #a429ec14 100%),
+    #ffffffb8 !important;
+  border-color: #a429ec2e !important;
+}
+
+body.breakpoint-specific-active .preview-inspector__content.preview-inspector__content--breakpoint-specific-active
+  .preview-inspector__breakpoint-scope-toggle input:checked + .preview-inspector__background-toggle-track {
+  background: #a429ec !important;
+  box-shadow: inset 0 0 0 1px #a429ec5c !important;
+}

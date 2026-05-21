@@ -7,8 +7,6 @@ import { toCanvas } from "html-to-image";
   const requestToken = String(params.get("thumb-request") || "").trim();
   const THUMBNAIL_WIDTH = 264;
   const THUMBNAIL_HEIGHT = 192;
-  const DESKTOP_THUMBNAIL_VIEWPORT_WIDTH = 1440;
-  const DESKTOP_THUMBNAIL_VIEWPORT_HEIGHT = 1047;
 
   if (!isTableThumbnail || !shouldCapture) {
     return;
@@ -26,21 +24,7 @@ import { toCanvas } from "html-to-image";
     return String(params.get("project") || document.body.dataset.projectKey || "").trim().toLowerCase();
   }
 
-  function applyDesktopThumbnailViewport() {
-    if (params.get("thumb-viewport") !== "desktop") {
-      return;
-    }
-
-    document.documentElement.style.setProperty("--preview-device-width", `${DESKTOP_THUMBNAIL_VIEWPORT_WIDTH}px`);
-    document.documentElement.style.setProperty("--preview-device-height", `${DESKTOP_THUMBNAIL_VIEWPORT_HEIGHT}px`);
-    document.documentElement.style.setProperty("--phone-scale", "1");
-    document.querySelectorAll(".mobile-page").forEach((page) => {
-      page.dataset.previewViewport = "desktop";
-    });
-  }
-
   function getCaptureTarget() {
-    applyDesktopThumbnailViewport();
     return document.querySelector(".phone-frame-wrap");
   }
 
@@ -89,7 +73,6 @@ import { toCanvas } from "html-to-image";
 
   async function captureThumbnail() {
     try {
-      applyDesktopThumbnailViewport();
       const target = await waitForReadyTarget();
       const rect = target.getBoundingClientRect();
       const sourceCanvas = await toCanvas(target, {

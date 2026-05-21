@@ -9,8 +9,6 @@
   const PROJECT_RECENT_OPEN_KEY_PREFIX = "ux-bridge-project-recent-open";
   const TOAST_DISMISS_MS = 4000;
   const TOAST_EXIT_MS = 260;
-  const PROJECT_THUMBNAIL_VIEWPORT_WIDTH = 1440;
-  const PROJECT_THUMBNAIL_VIEWPORT_HEIGHT = 1047;
   const root = document.querySelector("[data-projects-root]");
   const heroActionsRoot = document.querySelector("[data-projects-hero-actions]");
   const generatorHost = document.createElement("div");
@@ -602,10 +600,6 @@
     thumbnailGeneratorFrame = document.createElement("iframe");
     thumbnailGeneratorFrame.className = "bridge-projects__thumbnail-generator-frame";
     thumbnailGeneratorFrame.setAttribute("tabindex", "-1");
-    generatorHost.style.width = `${PROJECT_THUMBNAIL_VIEWPORT_WIDTH}px`;
-    generatorHost.style.height = `${PROJECT_THUMBNAIL_VIEWPORT_HEIGHT}px`;
-    thumbnailGeneratorFrame.style.width = `${PROJECT_THUMBNAIL_VIEWPORT_WIDTH}px`;
-    thumbnailGeneratorFrame.style.height = `${PROJECT_THUMBNAIL_VIEWPORT_HEIGHT}px`;
     generatorHost.replaceChildren(thumbnailGeneratorFrame);
     return thumbnailGeneratorFrame;
   }
