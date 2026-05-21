@@ -872,9 +872,20 @@
 
   function syncLayout() {
     const drawerWidth = getActiveDrawerWidth();
+    const panelWidth = Number.parseFloat(window.getComputedStyle(panel).getPropertyValue("--preview-dev-panel-width")) || Math.round(panel.getBoundingClientRect().width) || 300;
+    const sideActions = document.querySelector("[data-side-actions]");
+    const sideActionsOffset = state.open ? drawerWidth + panelWidth : drawerWidth;
 
     panel.style.right = `${drawerWidth}px`;
     document.body.classList.toggle("preview-dev-open", state.open);
+    document.body.style.setProperty("--bridge-side-actions-offset", state.open ? `${panelWidth}px` : "0px");
+    document.body.style.setProperty("--bridge-side-actions-reserved", state.open ? `calc(var(--bridge-side-actions-width, 88px) + ${panelWidth}px)` : "var(--bridge-side-actions-width, 88px)");
+
+    if (sideActions instanceof HTMLElement && !document.body.classList.contains("preview-viewport-responsive")) {
+      sideActions.style.setProperty("right", `${sideActionsOffset}px`, "important");
+    } else if (sideActions instanceof HTMLElement) {
+      sideActions.style.removeProperty("right");
+    }
   }
 
   function syncHighlightScroll() {
