@@ -18,6 +18,7 @@
     error: "",
     status: "",
     editorValue: "",
+    overridesValue: "",
     renderedMode: "",
     renderedBreakpointMode: null,
     hoveredHtmlLine: -1,
@@ -37,6 +38,7 @@
     resizingPanel: false,
     resizeStartX: 0,
     resizeStartWidth: 300,
+    overridesDirty: false,
   };
   let previewStateObserver = null;
   let previewHoverOverlay = null;
@@ -272,6 +274,46 @@
       overflow: hidden;
       display: block;
       background: #020617;
+    }
+
+    .preview-dev-panel__split {
+      min-height: 0;
+      display: grid;
+      grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+      background: #020617;
+    }
+
+    .preview-dev-panel__split-pane {
+      min-height: 0;
+      position: relative;
+      overflow: hidden;
+      background: #020617;
+    }
+
+    .preview-dev-panel__split-pane > .preview-dev-panel__body {
+      height: 100%;
+    }
+
+    .preview-dev-panel__split-pane--overrides {
+      border-top: 1px solid rgba(164, 41, 236, 0.3);
+      background:
+        linear-gradient(135deg, rgba(164, 41, 236, 0.1), rgba(2, 6, 23, 0) 62%),
+        #020617;
+    }
+
+    .preview-dev-panel__pane-label {
+      position: absolute;
+      top: 9px;
+      right: 12px;
+      z-index: 5;
+      pointer-events: none;
+      color: #c084fc;
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 0.12em;
+      line-height: 1;
+      text-transform: uppercase;
+      opacity: 0.82;
     }
 
     .preview-dev-panel__code,
@@ -766,13 +808,11 @@
   }
 
   function getModeTabs() {
-    return getBreakpointMode()
-      ? [{ id: "overrides", label: "Overrides" }]
-      : [
-          { id: "html", label: "HTML" },
-          { id: "css", label: "CSS" },
-          { id: "js", label: "JavaScript" },
-        ];
+    return [
+      { id: "html", label: "HTML" },
+      { id: "css", label: "CSS" },
+      { id: "js", label: "JavaScript" },
+    ];
   }
 
   function getContentForMode(mode = state.mode) {
@@ -879,6 +919,11 @@
       state.dirty = false;
       resetCodeHistory();
     }
+
+    if (!preserveDirty || !state.overridesDirty) {
+      state.overridesValue = getContentForMode("overrides");
+      state.overridesDirty = false;
+    }
   }
 
   function getActiveDrawerWidth() {
@@ -979,24 +1024,38 @@
   function syncHighlightScroll() {
     const editor = panel.querySelector("[data-preview-dev-editor]");
     const code = panel.querySelector("[data-preview-dev-code]");
+    const overridesEditor = panel.querySelector("[data-preview-dev-overrides-editor]");
+    const overridesCode = panel.querySelector("[data-preview-dev-overrides-code]");
 
     if (editor instanceof HTMLTextAreaElement && code instanceof HTMLElement) {
       code.scrollTop = editor.scrollTop;
       code.scrollLeft = editor.scrollLeft;
     }
 
+    if (overridesEditor instanceof HTMLTextAreaElement && overridesCode instanceof HTMLElement) {
+      overridesCode.scrollTop = overridesEditor.scrollTop;
+      overridesCode.scrollLeft = overridesEditor.scrollLeft;
+    }
+
     syncLineNumbers();
+    syncOverridesLineNumbers();
     syncHtmlLayerDecorations();
   }
 
   function syncHighlightText() {
     const code = panel.querySelector("[data-preview-dev-code]");
+    const overridesCode = panel.querySelector("[data-preview-dev-overrides-code]");
 
     if (code) {
       code.innerHTML = `${highlightCode(state.editorValue, state.mode)}\n`;
     }
 
+    if (overridesCode) {
+      overridesCode.innerHTML = `${highlightCode(state.overridesValue, "overrides")}\n`;
+    }
+
     syncLineNumbers();
+    syncOverridesLineNumbers();
     syncHtmlLayerDecorations();
   }
 
@@ -1033,6 +1092,29 @@
     const selectedLine = getSelectedCodeLine();
 
     lineNumbers.innerHTML = Array.from({ length: getEditorLineCount() }, (_, index) => {
+      const top = paddingTop + index * lineHeight - scrollTop;
+      const selectedClass = index === selectedLine ? " is-selected" : "";
+
+      return `<span class="preview-dev-panel__line-number${selectedClass}" style="top: ${top}px;">${index + 1}</span>`;
+    }).join("");
+  }
+
+  function syncOverridesLineNumbers() {
+    const lineNumbers = panel.querySelector("[data-preview-dev-overrides-line-numbers]");
+    const editor = panel.querySelector("[data-preview-dev-overrides-editor]");
+
+    if (!(lineNumbers instanceof HTMLElement)) {
+      return;
+    }
+
+    const lineHeight =
+      editor instanceof HTMLTextAreaElement ? getEditorMetric(editor, "line-height", 18.6) : Number.parseFloat(getComputedStyle(document.documentElement).fontSize) || 18.6;
+    const paddingTop = editor instanceof HTMLTextAreaElement ? getEditorMetric(editor, "padding-top", 14) : 14;
+    const scrollTop = editor instanceof HTMLTextAreaElement ? editor.scrollTop || 0 : 0;
+    const selectedLine =
+      editor instanceof HTMLTextAreaElement && document.activeElement === editor ? getEditorLineFromOffset(editor.value, editor.selectionStart || 0) : -1;
+
+    lineNumbers.innerHTML = Array.from({ length: getEditorLineCount(state.overridesValue) }, (_, index) => {
       const top = paddingTop + index * lineHeight - scrollTop;
       const selectedClass = index === selectedLine ? " is-selected" : "";
 
@@ -1732,9 +1814,9 @@
       nextPreview.css = state.editorValue;
     } else if (state.mode === "js") {
       nextPreview.js = state.editorValue;
-    } else if (state.mode === "overrides") {
-      nextPreview.breakpointOverrides = JSON.parse(state.editorValue || "{}");
     }
+
+    nextPreview.breakpointOverrides = JSON.parse(state.overridesValue || "{}");
 
     return nextPreview;
   }
@@ -1855,12 +1937,13 @@
     return true;
   }
 
-  function scheduleAutosave() {
+  function scheduleAutosave(editorKey = "main") {
     try {
       state.pendingAutosavePayload = {
         ...getSavePayload(),
         __mode: state.mode,
-        __value: state.editorValue,
+        __editorKey: editorKey,
+        __value: editorKey === "overrides" ? state.overridesValue : state.editorValue,
       };
     } catch (error) {
       state.error = error instanceof Error ? error.message : "Overrides must be valid JSON.";
@@ -1936,7 +2019,7 @@
         <div class="preview-dev-panel__title-row">
           <div>
             <p class="preview-dev-panel__eyebrow">Dev Mode</p>
-            <h2 class="preview-dev-panel__title">${breakpointMode ? "Breakpoint Overrides" : "Preview Code"}</h2>
+            <h2 class="preview-dev-panel__title">Preview Code</h2>
           </div>
           <button type="button" class="preview-dev-panel__close" data-preview-dev-close aria-label="Close Dev Mode">
             <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -1957,13 +2040,39 @@
             .join("")}
         </nav>
       </header>
-      <div class="preview-dev-panel__body" data-preview-dev-body>
-        <div class="preview-dev-panel__row-highlights" data-preview-dev-row-highlights></div>
-        <div class="preview-dev-panel__line-numbers" data-preview-dev-line-numbers aria-hidden="true"></div>
-        <div class="preview-dev-panel__layer-gutter" data-preview-dev-layer-gutter></div>
-        <pre class="preview-dev-panel__code" data-preview-dev-code aria-hidden="true"><code>${highlightCode(state.editorValue, state.mode)}\n</code></pre>
-        <textarea class="preview-dev-panel__editor" data-preview-dev-editor spellcheck="false" aria-label="${escapeHtml(state.mode)} editor">${escapeHtml(state.editorValue)}</textarea>
-      </div>
+      ${
+        breakpointMode
+          ? `
+            <div class="preview-dev-panel__split">
+              <div class="preview-dev-panel__split-pane">
+                <div class="preview-dev-panel__body" data-preview-dev-body>
+                  <div class="preview-dev-panel__row-highlights" data-preview-dev-row-highlights></div>
+                  <div class="preview-dev-panel__line-numbers" data-preview-dev-line-numbers aria-hidden="true"></div>
+                  <div class="preview-dev-panel__layer-gutter" data-preview-dev-layer-gutter></div>
+                  <pre class="preview-dev-panel__code" data-preview-dev-code aria-hidden="true"><code>${highlightCode(state.editorValue, state.mode)}\n</code></pre>
+                  <textarea class="preview-dev-panel__editor" data-preview-dev-editor spellcheck="false" aria-label="${escapeHtml(state.mode)} editor">${escapeHtml(state.editorValue)}</textarea>
+                </div>
+              </div>
+              <div class="preview-dev-panel__split-pane preview-dev-panel__split-pane--overrides">
+                <span class="preview-dev-panel__pane-label">Overrides</span>
+                <div class="preview-dev-panel__body" data-preview-dev-overrides-body>
+                  <div class="preview-dev-panel__line-numbers" data-preview-dev-overrides-line-numbers aria-hidden="true"></div>
+                  <pre class="preview-dev-panel__code" data-preview-dev-overrides-code aria-hidden="true"><code>${highlightCode(state.overridesValue, "overrides")}\n</code></pre>
+                  <textarea class="preview-dev-panel__editor" data-preview-dev-overrides-editor spellcheck="false" aria-label="Overrides editor">${escapeHtml(state.overridesValue)}</textarea>
+                </div>
+              </div>
+            </div>
+          `
+          : `
+            <div class="preview-dev-panel__body" data-preview-dev-body>
+              <div class="preview-dev-panel__row-highlights" data-preview-dev-row-highlights></div>
+              <div class="preview-dev-panel__line-numbers" data-preview-dev-line-numbers aria-hidden="true"></div>
+              <div class="preview-dev-panel__layer-gutter" data-preview-dev-layer-gutter></div>
+              <pre class="preview-dev-panel__code" data-preview-dev-code aria-hidden="true"><code>${highlightCode(state.editorValue, state.mode)}\n</code></pre>
+              <textarea class="preview-dev-panel__editor" data-preview-dev-editor spellcheck="false" aria-label="${escapeHtml(state.mode)} editor">${escapeHtml(state.editorValue)}</textarea>
+            </div>
+          `
+      }
       <div class="preview-dev-panel__resize-handle" data-preview-dev-resize-handle role="separator" aria-orientation="vertical" aria-label="Resize Dev Mode drawer" tabindex="0"></div>
     `;
 
@@ -1971,6 +2080,7 @@
     syncLayout();
     ensurePreviewStateObserver();
     syncLineNumbers();
+    syncOverridesLineNumbers();
     syncHtmlLayerDecorations();
     schedulePreviewHoverOverlaySync();
   }
@@ -2161,6 +2271,11 @@
       return;
     }
 
+    if (target instanceof HTMLTextAreaElement && target.matches("[data-preview-dev-overrides-editor]")) {
+      window.requestAnimationFrame(syncOverridesLineNumbers);
+      return;
+    }
+
     if (target.closest("[data-preview-dev-body]") && state.mode === "html") {
       const line = getHtmlLayerLineFromPointer(event);
 
@@ -2173,7 +2288,22 @@
   panel.addEventListener("input", (event) => {
     const target = event.target;
 
-    if (!(target instanceof HTMLTextAreaElement) || !target.matches("[data-preview-dev-editor]")) {
+    if (!(target instanceof HTMLTextAreaElement)) {
+      return;
+    }
+
+    if (target.matches("[data-preview-dev-overrides-editor]")) {
+      state.overridesValue = target.value;
+      state.overridesDirty = true;
+      state.status = "";
+      state.error = "";
+      syncHighlightText();
+      applyLivePreview();
+      scheduleAutosave("overrides");
+      return;
+    }
+
+    if (!target.matches("[data-preview-dev-editor]")) {
       return;
     }
 
@@ -2190,7 +2320,7 @@
   panel.addEventListener("scroll", (event) => {
     const target = event.target;
 
-    if (target instanceof HTMLTextAreaElement && target.matches("[data-preview-dev-editor]")) {
+    if (target instanceof HTMLTextAreaElement && (target.matches("[data-preview-dev-editor]") || target.matches("[data-preview-dev-overrides-editor]"))) {
       syncHighlightScroll();
     }
   }, true);
@@ -2222,7 +2352,20 @@
   panel.addEventListener("keyup", (event) => {
     const target = event.target;
 
-    if (!(target instanceof HTMLTextAreaElement) || !target.matches("[data-preview-dev-editor]")) {
+    if (!(target instanceof HTMLTextAreaElement)) {
+      return;
+    }
+
+    if (target.matches("[data-preview-dev-overrides-editor]")) {
+      const navigationKeys = new Set(["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown"]);
+
+      if (navigationKeys.has(event.key)) {
+        syncOverridesLineNumbers();
+      }
+      return;
+    }
+
+    if (!target.matches("[data-preview-dev-editor]")) {
       return;
     }
 
@@ -2239,7 +2382,16 @@
   panel.addEventListener("select", (event) => {
     const target = event.target;
 
-    if (!(target instanceof HTMLTextAreaElement) || !target.matches("[data-preview-dev-editor]")) {
+    if (!(target instanceof HTMLTextAreaElement)) {
+      return;
+    }
+
+    if (target.matches("[data-preview-dev-overrides-editor]")) {
+      window.requestAnimationFrame(syncOverridesLineNumbers);
+      return;
+    }
+
+    if (!target.matches("[data-preview-dev-editor]")) {
       return;
     }
 
@@ -2306,7 +2458,17 @@
   panel.addEventListener("keydown", (event) => {
     const target = event.target;
 
-    if (!(target instanceof HTMLTextAreaElement) || !target.matches("[data-preview-dev-editor]")) {
+    if (!(target instanceof HTMLTextAreaElement)) {
+      return;
+    }
+
+    const isOverridesEditor = target.matches("[data-preview-dev-overrides-editor]");
+
+    if (!isOverridesEditor && !target.matches("[data-preview-dev-editor]")) {
+      return;
+    }
+
+    if (isOverridesEditor && (event.metaKey || event.ctrlKey) && (event.key.toLowerCase() === "z" || event.key.toLowerCase() === "y")) {
       return;
     }
 
@@ -2354,9 +2516,9 @@
       payload.css = state.editorValue;
     } else if (state.mode === "js") {
       payload.js = state.editorValue;
-    } else if (state.mode === "overrides") {
-      payload.breakpointOverrides = JSON.parse(state.editorValue || "{}");
     }
+
+    payload.breakpointOverrides = JSON.parse(state.overridesValue || "{}");
 
     return payload;
   }
@@ -2377,8 +2539,10 @@
     }
 
     const savedMode = payload.__mode || state.mode;
+    const savedEditorKey = payload.__editorKey || "main";
     const savedValue = payload.__value ?? state.editorValue;
     delete payload.__mode;
+    delete payload.__editorKey;
     delete payload.__value;
     state.pendingAutosavePayload = null;
 
@@ -2405,15 +2569,26 @@
         return;
       }
 
-      const canMarkClean = state.mode === savedMode && state.editorValue === savedValue;
+      const canMarkClean =
+        savedEditorKey === "overrides" ? state.overridesValue === savedValue : state.mode === savedMode && state.editorValue === savedValue;
       const wasDirty = state.dirty;
+      const wasOverridesDirty = state.overridesDirty;
       if (canMarkClean) {
-        state.dirty = false;
+        if (savedEditorKey === "overrides") {
+          state.overridesDirty = false;
+        } else {
+          state.dirty = false;
+        }
       }
       applyProject(result.project, payload.page);
-      state.dirty = !canMarkClean && wasDirty;
+      state.dirty = savedEditorKey === "overrides" ? wasDirty : !canMarkClean && wasDirty;
+      state.overridesDirty = savedEditorKey === "overrides" ? !canMarkClean && wasOverridesDirty : wasOverridesDirty;
       if (canMarkClean) {
-        state.dirty = false;
+        if (savedEditorKey === "overrides") {
+          state.overridesDirty = false;
+        } else {
+          state.dirty = false;
+        }
       }
       state.status = "Saved";
     } catch (error) {
@@ -2436,6 +2611,10 @@
 
     if (!state.dirty) {
       state.editorValue = getContentForMode(state.mode);
+    }
+
+    if (!state.overridesDirty) {
+      state.overridesValue = getContentForMode("overrides");
     }
   }
 
