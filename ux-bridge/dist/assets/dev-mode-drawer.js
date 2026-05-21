@@ -20,6 +20,7 @@
     editorValue: "",
     cssFullValue: "",
     cssFilterSignature: "",
+    cssShowAll: false,
     jsFullValue: "",
     jsFilterSignature: "",
     overridesValue: "",
@@ -291,6 +292,11 @@
       background: #020617;
     }
 
+    .preview-dev-panel__body.has-filter-footer .preview-dev-panel__code,
+    .preview-dev-panel__body.has-filter-footer .preview-dev-panel__editor {
+      padding-bottom: 58px;
+    }
+
     .preview-dev-panel__split {
       min-height: 0;
       display: grid;
@@ -401,6 +407,51 @@
       tab-size: 2;
       white-space: pre;
       overflow-wrap: normal;
+    }
+
+    .preview-dev-panel__filter-footer {
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      z-index: 8;
+      display: flex;
+      justify-content: center;
+      padding: 10px 12px 12px;
+      pointer-events: none;
+      background: linear-gradient(180deg, rgba(2, 6, 23, 0), rgba(2, 6, 23, 0.96) 34%, #020617 100%);
+    }
+
+    .preview-dev-panel__see-all {
+      pointer-events: auto;
+      border: 1px solid rgba(96, 165, 250, 0.32);
+      border-radius: 999px;
+      padding: 7px 12px;
+      color: #bfdbfe;
+      background: rgba(37, 99, 235, 0.2);
+      font-size: 12px;
+      font-weight: 800;
+      line-height: 1;
+      box-shadow: 0 10px 20px rgba(2, 6, 23, 0.26);
+    }
+
+    .preview-dev-panel__see-all:hover,
+    .preview-dev-panel__see-all:focus-visible {
+      color: #ffffff;
+      background: rgba(37, 99, 235, 0.32);
+      border-color: rgba(147, 197, 253, 0.54);
+    }
+
+    .preview-dev-panel.is-breakpoint-active .preview-dev-panel__see-all {
+      color: #f3e8ff;
+      background: rgba(164, 41, 236, 0.24);
+      border-color: rgba(216, 180, 254, 0.42);
+    }
+
+    .preview-dev-panel.is-breakpoint-active .preview-dev-panel__see-all:hover,
+    .preview-dev-panel.is-breakpoint-active .preview-dev-panel__see-all:focus-visible {
+      background: rgba(164, 41, 236, 0.36);
+      border-color: rgba(233, 213, 255, 0.58);
     }
 
     .preview-dev-panel__code {
@@ -949,7 +1000,8 @@
     const preview = getPreview();
 
     if (mode === "css") {
-      return getFilteredCssForSelectedLayer(String(preview.css || state.cssFullValue || ""));
+      const cssValue = String(preview.css || state.cssFullValue || "");
+      return state.cssShowAll ? cssValue : getFilteredCssForSelectedLayer(cssValue);
     }
 
     if (mode === "js") {
@@ -1612,7 +1664,14 @@
       (element) => element instanceof Element,
     );
 
-    return root.matches('[data-ux-layer-selected]:not([data-ux-layer-selected="false"])') ? [root, ...selectedElements] : selectedElements;
+    const explicitSelection = root.matches('[data-ux-layer-selected]:not([data-ux-layer-selected="false"])') ? [root, ...selectedElements] : selectedElements;
+
+    if (explicitSelection.length) {
+      return explicitSelection;
+    }
+
+    const persistedSelection = state.previewSelectedLayerPath ? getPreviewElementForLayerPath(state.previewSelectedLayerPath) : null;
+    return persistedSelection instanceof Element ? [persistedSelection] : [];
   }
 
   function getSelectedCssRules(value) {
@@ -1642,10 +1701,14 @@
     return selectedRules.map((rule) => getCssRuleSource(value, rule)).filter(Boolean).join("\n\n");
   }
 
+  function isCssFilteredViewActive() {
+    return state.mode === "css" && !state.cssShowAll && getSelectedCssLayerElements().length > 0;
+  }
+
   function getCssOutputValue() {
     const fullCss = String(state.cssFullValue || getPreview().css || "");
 
-    if (state.mode !== "css" || !getSelectedCssLayerElements().length) {
+    if (state.mode !== "css" || state.cssShowAll || !getSelectedCssLayerElements().length) {
       return state.mode === "css" ? state.editorValue : fullCss;
     }
 
@@ -2349,7 +2412,13 @@
 
     const nextFullValue = String(getPreview().css || state.cssFullValue || "");
     const nextSignature = getCssFilterSignature();
-    const nextEditorValue = getFilteredCssForSelectedLayer(nextFullValue);
+    const signatureChanged = nextSignature !== state.cssFilterSignature;
+
+    if (signatureChanged) {
+      state.cssShowAll = false;
+    }
+
+    const nextEditorValue = state.cssShowAll ? nextFullValue : getFilteredCssForSelectedLayer(nextFullValue);
 
     if (!force && nextFullValue === state.cssFullValue && nextSignature === state.cssFilterSignature && nextEditorValue === state.editorValue) {
       return;
@@ -3291,6 +3360,15 @@
     syncModeToBreakpointState({ preserveDirty: true });
     const tabs = getModeTabs();
     const breakpointMode = getBreakpointMode();
+    const cssFilteredView = isCssFilteredViewActive();
+    const editorBodyClass = `preview-dev-panel__body${cssFilteredView ? " has-filter-footer" : ""}`;
+    const cssFilterFooter = cssFilteredView
+      ? `
+        <div class="preview-dev-panel__filter-footer">
+          <button type="button" class="preview-dev-panel__see-all" data-preview-dev-css-see-all>See All</button>
+        </div>
+      `
+      : "";
     state.renderedMode = state.mode;
     state.renderedBreakpointMode = breakpointMode;
     panel.classList.toggle("is-breakpoint-active", breakpointMode);
@@ -3327,12 +3405,13 @@
           ? `
             <div class="preview-dev-panel__split" data-preview-dev-split>
               <div class="preview-dev-panel__split-pane">
-                <div class="preview-dev-panel__body" data-preview-dev-body>
+                <div class="${editorBodyClass}" data-preview-dev-body>
                   <div class="preview-dev-panel__row-highlights" data-preview-dev-row-highlights></div>
                   <div class="preview-dev-panel__line-numbers" data-preview-dev-line-numbers aria-hidden="true"></div>
                   <div class="preview-dev-panel__layer-gutter" data-preview-dev-layer-gutter></div>
                   <pre class="preview-dev-panel__code" data-preview-dev-code aria-hidden="true"><code>${highlightCode(state.editorValue, state.mode)}\n</code></pre>
                   <textarea class="preview-dev-panel__editor" data-preview-dev-editor spellcheck="false" aria-label="${escapeHtml(state.mode)} editor">${escapeHtml(state.editorValue)}</textarea>
+                  ${cssFilterFooter}
                 </div>
               </div>
               <div class="preview-dev-panel__split-pane preview-dev-panel__split-pane--overrides" data-preview-dev-overrides-pane>
@@ -3351,12 +3430,13 @@
             </div>
           `
           : `
-            <div class="preview-dev-panel__body" data-preview-dev-body>
+            <div class="${editorBodyClass}" data-preview-dev-body>
               <div class="preview-dev-panel__row-highlights" data-preview-dev-row-highlights></div>
               <div class="preview-dev-panel__line-numbers" data-preview-dev-line-numbers aria-hidden="true"></div>
               <div class="preview-dev-panel__layer-gutter" data-preview-dev-layer-gutter></div>
               <pre class="preview-dev-panel__code" data-preview-dev-code aria-hidden="true"><code>${highlightCode(state.editorValue, state.mode)}\n</code></pre>
               <textarea class="preview-dev-panel__editor" data-preview-dev-editor spellcheck="false" aria-label="${escapeHtml(state.mode)} editor">${escapeHtml(state.editorValue)}</textarea>
+              ${cssFilterFooter}
             </div>
           `
       }
@@ -3527,6 +3607,8 @@
       return;
     }
 
+    event.stopPropagation();
+
     const closeButton = target.closest("[data-preview-dev-close]");
 
     if (closeButton) {
@@ -3544,6 +3626,26 @@
       if (event.detail === 0) {
         toggleHtmlLayerVisibility(line);
       }
+      return;
+    }
+
+    const cssSeeAll = target.closest("[data-preview-dev-css-see-all]");
+
+    if (cssSeeAll) {
+      event.preventDefault();
+      const mergedCss = getCssOutputValue();
+      state.cssShowAll = true;
+      state.cssFullValue = mergedCss;
+      state.editorValue = mergedCss;
+      state.dirty = true;
+      state.error = "";
+      state.status = "";
+      state.hoveredCssRule = null;
+      activatePreviewHoverForElements([]);
+      resetCodeHistory();
+      applyLivePreview();
+      scheduleAutosave();
+      render();
       return;
     }
 
@@ -3627,6 +3729,14 @@
     },
     true
   );
+
+  panel.addEventListener("pointerdown", (event) => {
+    event.stopPropagation();
+  });
+
+  panel.addEventListener("mousedown", (event) => {
+    event.stopPropagation();
+  });
 
   panel.addEventListener("input", (event) => {
     const target = event.target;
