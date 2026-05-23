@@ -24,6 +24,8 @@
     allowCssRefilterFromSelection: false,
     jsFullValue: "",
     jsFilterSignature: "",
+    jsShowAll: false,
+    allowJsRefilterFromSelection: false,
     overridesValue: "",
     renderedMode: "",
     renderedBreakpointMode: null,
@@ -35,6 +37,7 @@
     previewHoveredLayerPath: "",
     previewSelectedLayerPath: "",
     selectedHtmlLine: -1,
+    suppressHtmlCaretSelectUntil: 0,
     activePreviewHoverElement: null,
     activePreviewHoverElements: [],
     autosaveTimer: 0,
@@ -56,6 +59,7 @@
     overridesResizeStartHeight: 0,
     overridesDirty: false,
     overridesSyncTimer: 0,
+    layerTogglePointerActivatedUntil: 0,
   };
   let previewStateObserver = null;
   const previewHoverOverlays = [];
@@ -532,6 +536,47 @@
       font: inherit;
     }
 
+    .preview-dev-panel__empty-message {
+      position: absolute;
+      top: var(--preview-dev-editor-padding-top);
+      left: 16px;
+      right: 16px;
+      z-index: 9;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-sizing: border-box;
+      width: auto;
+      min-height: 96px;
+      border: 1px solid rgba(148, 163, 184, 0.18);
+      border-radius: 10px;
+      padding: 16px 18px;
+      color: #94a3b8;
+      background: rgba(15, 23, 42, 0.78);
+      font-size: 12px;
+      font-weight: 750;
+      line-height: 1.2;
+      text-align: center;
+      pointer-events: none;
+    }
+
+    .preview-dev-panel__empty-message[hidden] {
+      display: none;
+    }
+
+    .preview-dev-panel__body.is-empty-code .preview-dev-panel__row-highlights,
+    .preview-dev-panel__body.is-empty-code .preview-dev-panel__line-numbers,
+    .preview-dev-panel__body.is-empty-code .preview-dev-panel__layer-gutter,
+    .preview-dev-panel__body.is-empty-code .preview-dev-panel__code,
+    .preview-dev-panel__body.is-empty-code .preview-dev-panel__editor {
+      display: none;
+    }
+
+    .preview-dev-panel__body.is-empty-code .preview-dev-panel__filter-footer {
+      top: calc(var(--preview-dev-editor-padding-top) + 106px);
+      background: transparent;
+    }
+
     .preview-dev-panel__token--tag,
     .preview-dev-panel__token--keyword {
       color: #60a5fa;
@@ -879,6 +924,15 @@
     return highlightHtml(value);
   }
 
+  function hasAvailableCode(value) {
+    return Boolean(
+      String(value || "")
+        .replace(/[\u200b-\u200f\ufeff]/g, "")
+        .replace(/\u00a0/g, " ")
+        .trim(),
+    );
+  }
+
   function formatHtmlForEditor(value) {
     const source = String(value || "").trim();
 
@@ -917,9 +971,137 @@
       .join("\n");
   }
 
+  function formatCssForEditor(value) {
+    const source = String(value || "").trim();
+
+    if (!source) {
+      return "";
+    }
+
+    let output = "";
+    let depth = 0;
+    let quote = "";
+    let parenDepth = 0;
+    let pendingSpace = false;
+
+    const appendIndent = () => {
+      output += "  ".repeat(Math.max(0, depth));
+    };
+
+    const appendNewline = () => {
+      output = output.replace(/[ \t]+$/g, "");
+      if (!output.endsWith("\n")) {
+        output += "\n";
+      }
+      appendIndent();
+      pendingSpace = false;
+    };
+
+    for (let index = 0; index < source.length; index += 1) {
+      const char = source[index];
+      const previous = source[index - 1] || "";
+
+      if (quote) {
+        output += char;
+        if (char === quote && previous !== "\\") {
+          quote = "";
+        }
+        continue;
+      }
+
+      if (char === '"' || char === "'") {
+        if (pendingSpace && output && !/[\s({:;,>]$/.test(output)) {
+          output += " ";
+        }
+        pendingSpace = false;
+        quote = char;
+        output += char;
+        continue;
+      }
+
+      if (char === "(") {
+        parenDepth += 1;
+        output += char;
+        continue;
+      }
+
+      if (char === ")") {
+        parenDepth = Math.max(0, parenDepth - 1);
+        output += char;
+        continue;
+      }
+
+      if (/\s/.test(char)) {
+        pendingSpace = true;
+        continue;
+      }
+
+      if (pendingSpace && output && !/[\s({:;,>]$/.test(output) && !/[{};]/.test(char)) {
+        output += " ";
+      }
+      pendingSpace = false;
+
+      if (char === "{" && parenDepth === 0) {
+        output = output.replace(/[ \t]+$/g, "");
+        output += " {\n";
+        depth += 1;
+        appendIndent();
+        continue;
+      }
+
+      if (char === "}" && parenDepth === 0) {
+        depth = Math.max(0, depth - 1);
+        output = output.replace(/[ \t]+$/g, "");
+        if (!output.endsWith("\n")) {
+          output += "\n";
+        }
+        appendIndent();
+        output += "}";
+        if (source[index + 1] && source[index + 1] !== "}") {
+          appendNewline();
+        }
+        continue;
+      }
+
+      if (char === ";" && parenDepth === 0) {
+        output += ";";
+        appendNewline();
+        continue;
+      }
+
+      if (char === "," && parenDepth === 0 && depth === 0) {
+        output += ",";
+        appendNewline();
+        continue;
+      }
+
+      if (char === ":" && parenDepth === 0) {
+        output = output.replace(/[ \t]+$/g, "");
+        output += ": ";
+        continue;
+      }
+
+      output += char;
+    }
+
+    return output
+      .split("\n")
+      .map((line) => line.replace(/[ \t]+$/g, ""))
+      .join("\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+  }
+
   function getPreview() {
     return state.page?.preview || state.page?.vibe?.appliedDraft || {};
   }
+
+  const CODE_OVERRIDE_LAYER_PATH = "__preview_code__";
+  const CODE_OVERRIDE_ATTRS = {
+    html: "data-ux-preview-html",
+    css: "data-ux-preview-css",
+    js: "data-ux-preview-js",
+  };
 
   function getBreakpointMode() {
     return (
@@ -961,7 +1143,7 @@
     const breakpoints = getInspectorBreakpoints();
     const matchedByLabel = breakpoints.find((breakpoint) => breakpoint.label === labelText);
 
-    if (matchedByLabel) {
+    if (getBreakpointMode() && matchedByLabel) {
       return matchedByLabel.id;
     }
 
@@ -970,6 +1152,43 @@
     const matchedByWidth = breakpoints.find((breakpoint) => width >= breakpoint.start && (breakpoint.end == null || width <= breakpoint.end));
 
     return matchedByWidth?.id || breakpoints[breakpoints.length - 1]?.id || "";
+  }
+
+  function getPreviewCodeOverride(preview = getPreview()) {
+    const breakpointId = getCurrentBreakpointId();
+    const override = preview?.breakpointOverrides?.[CODE_OVERRIDE_LAYER_PATH]?.[breakpointId];
+    const attrs = override && typeof override === "object" && override.attrs && typeof override.attrs === "object" ? override.attrs : null;
+
+    if (!breakpointId || !attrs) {
+      return null;
+    }
+
+    return {
+      html: Object.prototype.hasOwnProperty.call(attrs, CODE_OVERRIDE_ATTRS.html) ? String(attrs[CODE_OVERRIDE_ATTRS.html] || "") : null,
+      css: Object.prototype.hasOwnProperty.call(attrs, CODE_OVERRIDE_ATTRS.css) ? String(attrs[CODE_OVERRIDE_ATTRS.css] || "") : null,
+      js: Object.prototype.hasOwnProperty.call(attrs, CODE_OVERRIDE_ATTRS.js) ? String(attrs[CODE_OVERRIDE_ATTRS.js] || "") : null,
+    };
+  }
+
+  function getEffectivePreview(preview = getPreview(), options = {}) {
+    const requireBreakpointMode = options.requireBreakpointMode !== false;
+
+    if (requireBreakpointMode && !getBreakpointMode()) {
+      return preview || {};
+    }
+
+    const codeOverride = getPreviewCodeOverride(preview);
+
+    if (!codeOverride) {
+      return preview || {};
+    }
+
+    return {
+      ...(preview || {}),
+      html: codeOverride.html == null ? String(preview?.html || "") : codeOverride.html,
+      css: codeOverride.css == null ? String(preview?.css || "") : codeOverride.css,
+      js: codeOverride.js == null ? String(preview?.js || "") : codeOverride.js,
+    };
   }
 
   function hasCurrentBreakpointOverride(layerPath) {
@@ -1000,15 +1219,16 @@
   }
 
   function getContentForMode(mode = state.mode) {
-    const preview = getPreview();
+    const preview = getEffectivePreview();
 
     if (mode === "css") {
-      const cssValue = String(preview.css || state.cssFullValue || "");
+      const cssValue = formatCssForEditor(preview.css || state.cssFullValue || "");
       return state.cssShowAll ? cssValue : getFilteredCssForSelectedLayer(cssValue);
     }
 
     if (mode === "js") {
-      return getFilteredJsForSelectedLayer(String(preview.js || state.jsFullValue || ""));
+      const jsValue = String(preview.js || state.jsFullValue || "");
+      return state.jsShowAll ? jsValue : getFilteredJsForSelectedLayer(jsValue);
     }
 
     if (mode === "overrides") {
@@ -1100,10 +1320,10 @@
     }
 
     if (state.mode === "css") {
-      state.cssFullValue = String(getPreview().css || "");
+      state.cssFullValue = formatCssForEditor(getEffectivePreview().css || "");
       state.cssFilterSignature = getCssFilterSignature();
     } else if (state.mode === "js") {
-      state.jsFullValue = String(getPreview().js || "");
+      state.jsFullValue = String(getEffectivePreview().js || "");
       state.jsFilterSignature = getJsFilterSignature();
     }
 
@@ -1170,6 +1390,47 @@
     }
   }
 
+  function getDevModeLayoutState() {
+    return {
+      panelWidth: Math.max(300, Math.round(Number(state.panelWidth) || 300)),
+      overridesPaneHeight: Math.max(0, Math.round(Number(state.overridesPaneHeight) || 0)),
+    };
+  }
+
+  function emitDevModeLayoutChange() {
+    try {
+      window.dispatchEvent(
+        new CustomEvent("uxbridge:preview-dev-layout-change", {
+          detail: getDevModeLayoutState(),
+        }),
+      );
+    } catch {
+      // Layout memory is best-effort and should never block editing.
+    }
+  }
+
+  function setDevModeLayoutState(nextState = {}) {
+    const nextPanelWidth = Number(nextState.panelWidth);
+    const nextOverridesPaneHeight = Number(nextState.overridesPaneHeight);
+
+    if (Number.isFinite(nextPanelWidth) && nextPanelWidth >= 300) {
+      state.panelWidth = Math.max(300, Math.min(getMaxPanelWidth(), Math.round(nextPanelWidth)));
+    }
+
+    if (Number.isFinite(nextOverridesPaneHeight) && nextOverridesPaneHeight > 0) {
+      state.overridesPaneHeight = clampOverridesPaneHeight(nextOverridesPaneHeight);
+    }
+
+    syncLayout();
+    syncOverridesPaneLayout();
+    emitDevModeLayoutChange();
+  }
+
+  window.UXBridgeDevModeLayout = {
+    getState: getDevModeLayoutState,
+    setState: setDevModeLayoutState,
+  };
+
   function getMaxPanelWidth() {
     const drawerWidth = getActiveDrawerWidth();
     const sideActionsWidth =
@@ -1212,6 +1473,7 @@
 
     state.resizingPanel = false;
     document.body.classList.remove("preview-dev-resizing");
+    emitDevModeLayoutChange();
   }
 
   function getOverridesPaneBounds() {
@@ -1292,6 +1554,7 @@
 
     state.resizingOverridesPane = false;
     document.body.classList.remove("preview-dev-overrides-resizing");
+    emitDevModeLayoutChange();
   }
 
   function syncHighlightScroll() {
@@ -1332,8 +1595,21 @@
 
     syncLineNumbers();
     syncOverridesLineNumbers();
+    syncEmptyCodeMessage();
     syncHtmlLayerDecorations();
     syncOverridesLayerDecorations();
+  }
+
+  function syncEmptyCodeMessage() {
+    const message = panel.querySelector("[data-preview-dev-empty-message]");
+
+    if (!(message instanceof HTMLElement)) {
+      return;
+    }
+
+    const shouldShow = (state.mode === "css" || state.mode === "js") && !hasAvailableCode(state.editorValue);
+    message.hidden = !shouldShow;
+    message.closest(".preview-dev-panel__body")?.classList.toggle("is-empty-code", shouldShow);
   }
 
   function getEditorLineCount(value = state.editorValue) {
@@ -1375,11 +1651,11 @@
       return `<span class="preview-dev-panel__line-number${selectedClass}" style="top: ${top}px;">${index + 1}</span>`;
     }).join("");
 
-    syncCssFilterFooterPosition();
+    syncFilterFooterPosition();
   }
 
-  function syncCssFilterFooterPosition() {
-    const footer = panel.querySelector("[data-preview-dev-css-filter-footer]");
+  function syncFilterFooterPosition() {
+    const footer = panel.querySelector("[data-preview-dev-css-filter-footer], [data-preview-dev-js-filter-footer]");
     const editor = panel.querySelector("[data-preview-dev-editor]");
 
     if (!(footer instanceof HTMLElement) || !(editor instanceof HTMLTextAreaElement)) {
@@ -1531,25 +1807,28 @@
     }
 
     let ordinal = -1;
+    const rows = [];
 
-    return String(value || "")
+    String(value || "")
       .split("\n")
-      .map((line, index) => {
-        const match = line.match(/^\s*<(?!\/|!)([A-Za-z][\w:-]*)(?:\s|>|\/)/);
+      .forEach((line, index) => {
+        const tagPattern = /<([A-Za-z][\w:-]*)(?=[\s>/])[^>]*>/g;
+        let match = tagPattern.exec(line);
 
-        if (!match) {
-          return null;
+        while (match) {
+          ordinal += 1;
+          rows.push({
+            line: index,
+            ordinal,
+            tagStart: match.index,
+            tagEnd: match.index + match[0].length,
+            hidden: isHtmlLayerHidden(match[0]),
+          });
+          match = tagPattern.exec(line);
         }
+      });
 
-        ordinal += 1;
-
-        return {
-          line: index,
-          ordinal,
-          hidden: isHtmlLayerHidden(line),
-        };
-      })
-      .filter(Boolean);
+    return rows;
   }
 
   function getCssRules(value = state.editorValue) {
@@ -1692,7 +1971,19 @@
     }
 
     const persistedSelection = state.previewSelectedLayerPath ? getPreviewElementForLayerPath(state.previewSelectedLayerPath) : null;
-    return persistedSelection instanceof Element ? [persistedSelection] : [];
+    if (persistedSelection instanceof Element) {
+      return [persistedSelection];
+    }
+
+    if ((state.mode === "css" || state.mode === "js") && (state.cssFilterSignature || state.jsFilterSignature)) {
+      const signature = state.mode === "js" && state.jsFilterSignature ? state.jsFilterSignature : state.cssFilterSignature;
+      return signature
+        .split("|")
+        .map((layerPath) => getPreviewElementForLayerPath(layerPath))
+        .filter((element) => element instanceof Element);
+    }
+
+    return [];
   }
 
   function getSelectedCssRules(value) {
@@ -1727,7 +2018,7 @@
       return false;
     }
 
-    const fullCss = String(state.cssFullValue || getPreview().css || "");
+    const fullCss = String(state.cssFullValue || getEffectivePreview().css || "");
     const hasFilterTarget = Boolean(state.cssFilterSignature || getCssFilterSignature());
     const isShowingFilteredContent = String(state.editorValue || "") !== fullCss;
 
@@ -1735,7 +2026,7 @@
   }
 
   function getCssOutputValue() {
-    const fullCss = String(state.cssFullValue || getPreview().css || "");
+    const fullCss = String(state.cssFullValue || getEffectivePreview().css || "");
 
     if (state.mode !== "css" || state.cssShowAll || !getSelectedCssLayerElements().length) {
       return state.mode === "css" ? state.editorValue : fullCss;
@@ -1744,6 +2035,11 @@
     const fullRules = getCssRules(fullCss);
     const editedRules = getCssRules(state.editorValue);
     const selectedElements = getSelectedCssLayerElements();
+
+    if (hasAvailableCode(state.editorValue) && !editedRules.length) {
+      return fullCss;
+    }
+
     const editedSources = editedRules.map((rule) => getCssRuleSource(state.editorValue, rule));
     const editedBySelector = new Map();
 
@@ -1906,7 +2202,26 @@
   }
 
   function getSelectedJsLayerElements() {
-    return getSelectedCssLayerElements();
+    const selectedElements = getSelectedCssLayerElements();
+    const scopedElements = [];
+
+    selectedElements.forEach((element) => {
+      if (!(element instanceof Element)) {
+        return;
+      }
+
+      if (!scopedElements.includes(element)) {
+        scopedElements.push(element);
+      }
+
+      element.querySelectorAll("*").forEach((child) => {
+        if (child instanceof Element && !scopedElements.includes(child)) {
+          scopedElements.push(child);
+        }
+      });
+    });
+
+    return scopedElements;
   }
 
   function getSelectedJsBlocks(value) {
@@ -1934,10 +2249,22 @@
     return getSelectedJsBlocks(value).map((block) => getJsBlockSource(value, block)).filter(Boolean).join("\n\n");
   }
 
-  function getJsOutputValue() {
-    const fullJs = String(state.jsFullValue || getPreview().js || "");
+  function isJsFilteredViewActive() {
+    if (state.mode !== "js" || state.jsShowAll) {
+      return false;
+    }
 
-    if (state.mode !== "js" || !getSelectedJsLayerElements().length) {
+    const fullJs = String(state.jsFullValue || getEffectivePreview().js || "");
+    const hasFilterTarget = Boolean(state.jsFilterSignature || getJsFilterSignature());
+    const isShowingFilteredContent = String(state.editorValue || "") !== fullJs;
+
+    return hasFilterTarget || isShowingFilteredContent;
+  }
+
+  function getJsOutputValue() {
+    const fullJs = String(state.jsFullValue || getEffectivePreview().js || "");
+
+    if (state.mode !== "js" || state.jsShowAll || !getSelectedJsLayerElements().length) {
       return state.mode === "js" ? state.editorValue : fullJs;
     }
 
@@ -2314,9 +2641,10 @@
 
     elements.forEach((element, index) => {
       const overlay = ensurePreviewHoverOverlay(index);
-      const rect = element.getBoundingClientRect();
+      const targetElement = getVisibleOverlayElement(element);
+      const rect = targetElement?.getBoundingClientRect?.();
 
-      if (!element.isConnected || rect.width <= 0 || rect.height <= 0) {
+      if (!(targetElement instanceof Element) || !targetElement.isConnected || !rect || rect.width <= 0 || rect.height <= 0) {
         overlay.classList.remove("is-visible");
         return;
       }
@@ -2339,6 +2667,40 @@
     }
 
     previewHoverOverlayFrame = window.requestAnimationFrame(syncPreviewHoverOverlay);
+  }
+
+  function hasVisibleOverlayBox(element) {
+    if (!(element instanceof Element) || !element.isConnected) {
+      return false;
+    }
+
+    const rect = element.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  }
+
+  function getVisibleOverlayElement(element) {
+    if (hasVisibleOverlayBox(element)) {
+      return element;
+    }
+
+    const visibleChild = Array.from(element?.querySelectorAll?.("*") || []).find((child) => hasVisibleOverlayBox(child));
+
+    if (visibleChild instanceof Element) {
+      return visibleChild;
+    }
+
+    const root = getPreviewRenderRoot();
+    let current = element?.parentElement || null;
+
+    while (current instanceof Element && root instanceof Element && root.contains(current)) {
+      if (hasVisibleOverlayBox(current)) {
+        return current;
+      }
+
+      current = current.parentElement;
+    }
+
+    return element instanceof Element ? element : null;
   }
 
   function activatePreviewHoverForLine(line) {
@@ -2447,7 +2809,7 @@
       return;
     }
 
-    const nextFullValue = state.dirty ? getCssOutputValue() : String(getPreview().css || state.cssFullValue || "");
+    const nextFullValue = state.dirty ? formatCssForEditor(getCssOutputValue()) : formatCssForEditor(getEffectivePreview().css || state.cssFullValue || "");
 
     if (signatureChanged) {
       state.cssShowAll = false;
@@ -2484,18 +2846,31 @@
   }
 
   function syncJsEditorFilterFromSelection({ force = false } = {}) {
-    if (state.mode !== "js" || state.dirty) {
+    if (state.mode !== "js") {
       return;
     }
 
-    const nextFullValue = String(getPreview().js || state.jsFullValue || "");
+    const currentSignature = state.jsFilterSignature;
     const nextSignature = getJsFilterSignature();
-    const nextEditorValue = getFilteredJsForSelectedLayer(nextFullValue);
+    const signatureChanged = nextSignature !== currentSignature;
+
+    if (state.dirty && !force && !signatureChanged) {
+      return;
+    }
+
+    const nextFullValue = state.dirty ? getJsOutputValue() : String(getEffectivePreview().js || state.jsFullValue || "");
+
+    if (signatureChanged) {
+      state.jsShowAll = false;
+    }
+
+    const nextEditorValue = state.jsShowAll ? nextFullValue : getFilteredJsForSelectedLayer(nextFullValue);
 
     if (!force && nextFullValue === state.jsFullValue && nextSignature === state.jsFilterSignature && nextEditorValue === state.editorValue) {
       return;
     }
 
+    const hadFilterFooter = Boolean(panel.querySelector("[data-preview-dev-js-filter-footer]"));
     const editor = panel.querySelector("[data-preview-dev-editor]");
     const scrollTop = editor instanceof HTMLTextAreaElement ? editor.scrollTop : 0;
     const scrollLeft = editor instanceof HTMLTextAreaElement ? editor.scrollLeft : 0;
@@ -2509,6 +2884,11 @@
       editor.value = state.editorValue;
       editor.scrollTop = scrollTop;
       editor.scrollLeft = scrollLeft;
+    }
+
+    if (hadFilterFooter !== isJsFilteredViewActive()) {
+      render();
+      return;
     }
 
     syncHighlightText();
@@ -2576,9 +2956,10 @@
       }
       state.allowCssRefilterFromSelection = false;
       syncCssLayerDecorations();
-      if (selectionChanged) {
+      if (selectionChanged && (!state.jsShowAll || state.allowJsRefilterFromSelection)) {
         syncJsEditorFilterFromSelection();
       }
+      state.allowJsRefilterFromSelection = false;
       syncJsLayerDecorations();
       syncOverridesLineNumbers();
       syncOverridesLayerDecorations();
@@ -2693,6 +3074,21 @@
     state.status = "";
 
     if (editor instanceof HTMLTextAreaElement) {
+      editor.value = state.overridesValue;
+      editor.scrollTop = scrollTop;
+      editor.scrollLeft = scrollLeft;
+    }
+
+    syncHighlightText();
+    syncHighlightScroll();
+  }
+
+  function syncOverridesEditorFromState() {
+    const editor = panel.querySelector("[data-preview-dev-overrides-editor]");
+    const scrollTop = editor instanceof HTMLTextAreaElement ? editor.scrollTop : 0;
+    const scrollLeft = editor instanceof HTMLTextAreaElement ? editor.scrollLeft : 0;
+
+    if (editor instanceof HTMLTextAreaElement && editor.value !== state.overridesValue) {
       editor.value = state.overridesValue;
       editor.scrollTop = scrollTop;
       editor.scrollLeft = scrollLeft;
@@ -2850,13 +3246,27 @@
     const rows = getHtmlLayerRows();
     const hoverLine = getActiveHoverLine();
     const selectedLine = state.selectedHtmlLine;
-    const visibleRows = rows.filter((row) => row.hidden || row.line === hoverLine);
+    const getUniqueRowsByLine = (nextRows) => {
+      const seen = new Set();
+
+      return nextRows.filter((row) => {
+        const key = String(row.line);
+
+        if (seen.has(key)) {
+          return false;
+        }
+
+        seen.add(key);
+        return true;
+      });
+    };
+    const visibleRows = getUniqueRowsByLine(rows.filter((row) => row.hidden || row.line === hoverLine));
     const paddingTop = getEditorMetric(editor, "padding-top", 14);
     const lineHeight = getEditorMetric(editor, "line-height", 18.6);
     const scrollTop = editor.scrollTop || 0;
 
     if (rowHighlights instanceof HTMLElement) {
-      const highlightRows = rows.filter((row) => row.line === hoverLine || row.line === selectedLine);
+      const highlightRows = getUniqueRowsByLine(rows.filter((row) => row.line === hoverLine || row.line === selectedLine));
       rowHighlights.innerHTML = highlightRows
         .map((row) => {
           const top = paddingTop + row.line * lineHeight - scrollTop;
@@ -2881,6 +3291,7 @@
             style="top: ${top}px;"
             data-preview-dev-layer-toggle
             data-preview-dev-line="${row.line}"
+            data-preview-dev-tag-start="${row.tagStart}"
             aria-label="${label}"
             title="${label}"
           >
@@ -3117,14 +3528,35 @@
     return setAttributeOnTag(tag, "style", `${styleValue};`);
   }
 
-  function updateHtmlLayerLine(line, hidden) {
-    const match = line.match(/^(\s*)(<[^>]+>)([\s\S]*)$/);
+  function updateHtmlLayerLine(line, hidden, tagStart = -1) {
+    const tagPattern = /<([A-Za-z][\w:-]*)(?=[\s>/])[^>]*>/g;
+    let match = null;
+
+    if (Number.isInteger(tagStart) && tagStart >= 0) {
+      let nextMatch = tagPattern.exec(line);
+
+      while (nextMatch) {
+        if (nextMatch.index === tagStart) {
+          match = nextMatch;
+          break;
+        }
+
+        nextMatch = tagPattern.exec(line);
+      }
+    }
+
+    if (!match) {
+      tagPattern.lastIndex = 0;
+      match = tagPattern.exec(line);
+    }
 
     if (!match) {
       return line;
     }
 
-    let tag = match[2];
+    const before = line.slice(0, match.index);
+    let tag = match[0];
+    const after = line.slice(match.index + tag.length);
 
     if (hidden) {
       const currentDisplay = getStylePropertyValue(tag, "display");
@@ -3154,23 +3586,67 @@
       });
     }
 
-    return `${match[1]}${tag}${match[3]}`;
+    return `${before}${tag}${after}`;
   }
 
-  function toggleHtmlLayerVisibility(lineIndex) {
+  function capturePreviewScrollSnapshot() {
+    const nodes = new Set([
+      document.scrollingElement,
+      document.documentElement,
+      document.body,
+      document.querySelector(".bridge-main--project"),
+      document.querySelector(".bridge-preview-stage"),
+      document.querySelector(".mobile-page"),
+      document.querySelector("[data-vibe-mobile-stage]"),
+      document.querySelector("[data-vibe-mobile-render]"),
+    ]);
+
+    return Array.from(nodes)
+      .filter((node) => node instanceof Element)
+      .map((node) => ({
+        node,
+        top: node.scrollTop,
+        left: node.scrollLeft,
+      }));
+  }
+
+  function restorePreviewScrollSnapshot(snapshot) {
+    if (!Array.isArray(snapshot)) {
+      return;
+    }
+
+    snapshot.forEach((entry) => {
+      if (!entry?.node || !document.contains(entry.node)) {
+        return;
+      }
+
+      entry.node.scrollTop = entry.top;
+      entry.node.scrollLeft = entry.left;
+    });
+  }
+
+  function toggleHtmlLayerVisibility(lineIndex, tagStart = -1) {
     if (state.mode !== "html" || !Number.isInteger(lineIndex) || lineIndex < 0) {
       return;
     }
 
     const editor = panel.querySelector("[data-preview-dev-editor]");
+    const previewScrollSnapshot = capturePreviewScrollSnapshot();
     const lines = String(state.editorValue || "").split("\n");
 
     if (!lines[lineIndex]) {
       return;
     }
 
-    const nextHidden = !isHtmlLayerHidden(lines[lineIndex]);
-    lines[lineIndex] = updateHtmlLayerLine(lines[lineIndex], nextHidden);
+    const targetRow = getHtmlLayerRows().find(
+      (row) => row.line === lineIndex && (!Number.isInteger(tagStart) || tagStart < 0 || row.tagStart === tagStart),
+    );
+    const targetTag =
+      targetRow && Number.isInteger(targetRow.tagStart) && Number.isInteger(targetRow.tagEnd)
+        ? lines[lineIndex].slice(targetRow.tagStart, targetRow.tagEnd)
+        : lines[lineIndex];
+    const nextHidden = !isHtmlLayerHidden(targetTag);
+    lines[lineIndex] = updateHtmlLayerLine(lines[lineIndex], nextHidden, targetRow?.tagStart ?? tagStart);
     state.editorValue = lines.join("\n");
     state.dirty = true;
     state.error = "";
@@ -3184,13 +3660,29 @@
       editor.value = state.editorValue;
       editor.scrollTop = scrollTop;
       editor.scrollLeft = scrollLeft;
-      editor.focus();
+      try {
+        editor.focus({ preventScroll: true });
+      } catch {
+        editor.focus();
+      }
     }
 
     syncHighlightText();
     syncHighlightScroll();
     applyLivePreview();
+    restorePreviewScrollSnapshot(previewScrollSnapshot);
+    window.requestAnimationFrame(() => restorePreviewScrollSnapshot(previewScrollSnapshot));
     scheduleAutosave();
+  }
+
+  function activateHtmlLayerVisibilityToggle(layerToggle) {
+    if (!(layerToggle instanceof Element)) {
+      return;
+    }
+
+    const line = Number.parseInt(String(layerToggle.getAttribute("data-preview-dev-line") || ""), 10);
+    const tagStart = Number.parseInt(String(layerToggle.getAttribute("data-preview-dev-tag-start") || ""), 10);
+    toggleHtmlLayerVisibility(line, tagStart);
   }
 
   function buildPreviewFromEditor() {
@@ -3204,7 +3696,47 @@
       breakpointOverrides: preview.breakpointOverrides || {},
     };
 
-    if (state.mode === "html") {
+    if (getBreakpointMode() && state.mode !== "overrides") {
+      const breakpointId = getCurrentBreakpointId();
+      const overrides = state.overridesDirty ? JSON.parse(state.overridesValue || "{}") : JSON.parse(JSON.stringify(preview.breakpointOverrides || {}));
+
+      if (breakpointId) {
+        const currentBreakpointOverride = overrides[CODE_OVERRIDE_LAYER_PATH]?.[breakpointId] || {};
+        const attrs = {
+          ...(currentBreakpointOverride.attrs && typeof currentBreakpointOverride.attrs === "object" ? currentBreakpointOverride.attrs : {}),
+        };
+
+        if (!Object.prototype.hasOwnProperty.call(attrs, CODE_OVERRIDE_ATTRS.html)) {
+          attrs[CODE_OVERRIDE_ATTRS.html] = String(preview.html || "");
+        }
+        if (!Object.prototype.hasOwnProperty.call(attrs, CODE_OVERRIDE_ATTRS.css)) {
+          attrs[CODE_OVERRIDE_ATTRS.css] = String(preview.css || "");
+        }
+        if (!Object.prototype.hasOwnProperty.call(attrs, CODE_OVERRIDE_ATTRS.js)) {
+          attrs[CODE_OVERRIDE_ATTRS.js] = String(preview.js || "");
+        }
+
+        if (state.mode === "html") {
+          attrs[CODE_OVERRIDE_ATTRS.html] = state.editorValue;
+        } else if (state.mode === "css") {
+          attrs[CODE_OVERRIDE_ATTRS.css] = getCssOutputValue();
+        } else if (state.mode === "js") {
+          attrs[CODE_OVERRIDE_ATTRS.js] = getJsOutputValue();
+        }
+
+        overrides[CODE_OVERRIDE_LAYER_PATH] = {
+          ...(overrides[CODE_OVERRIDE_LAYER_PATH] && typeof overrides[CODE_OVERRIDE_LAYER_PATH] === "object"
+            ? overrides[CODE_OVERRIDE_LAYER_PATH]
+            : {}),
+          [breakpointId]: {
+            styles: {},
+            attrs,
+          },
+        };
+        nextPreview.breakpointOverrides = overrides;
+        state.overridesValue = JSON.stringify(overrides, null, 2);
+      }
+    } else if (state.mode === "html") {
       nextPreview.html = state.editorValue;
     } else if (state.mode === "css") {
       nextPreview.css = getCssOutputValue();
@@ -3212,7 +3744,9 @@
       nextPreview.js = getJsOutputValue();
     }
 
-    nextPreview.breakpointOverrides = JSON.parse(state.overridesValue || "{}");
+    if (state.mode === "overrides") {
+      nextPreview.breakpointOverrides = JSON.parse(state.overridesValue || "{}");
+    }
 
     return nextPreview;
   }
@@ -3320,7 +3854,10 @@
 
     state.error = "";
     updateLocalPreview(nextPreview);
-    renderLivePreview(nextPreview);
+    renderLivePreview(getEffectivePreview(nextPreview, { requireBreakpointMode: false }));
+    if (state.mode !== "overrides") {
+      syncOverridesEditorFromState();
+    }
     window.dispatchEvent(
       new CustomEvent("uxbridge:preview-code-live-update", {
         detail: {
@@ -3362,29 +3899,23 @@
     }
 
     state.allowCssRefilterFromSelection = true;
-    const rect = element.getBoundingClientRect();
-    const clientX = rect.left + Math.max(1, Math.min(rect.width / 2, rect.width - 1));
-    const clientY = rect.top + Math.max(1, Math.min(rect.height / 2, rect.height - 1));
-    const eventOptions = {
-      bubbles: true,
-      cancelable: true,
-      composed: true,
-      view: window,
-      clientX,
-      clientY,
-      button: 0,
-      buttons: 1,
-    };
+    state.allowJsRefilterFromSelection = true;
+    const layerPath = getPreviewLayerPathForElement(element);
 
-    if (typeof PointerEvent === "function") {
-      element.dispatchEvent(new PointerEvent("pointerdown", { ...eventOptions, pointerId: 1, pointerType: "mouse" }));
-      element.dispatchEvent(new PointerEvent("pointerup", { ...eventOptions, pointerId: 1, pointerType: "mouse", buttons: 0 }));
+    if (!layerPath) {
+      return false;
     }
 
-    element.dispatchEvent(new MouseEvent("mousedown", eventOptions));
-    element.dispatchEvent(new MouseEvent("mouseup", { ...eventOptions, buttons: 0 }));
-    element.dispatchEvent(new MouseEvent("click", { ...eventOptions, buttons: 0 }));
+    window.dispatchEvent(
+      new CustomEvent("uxbridge:comment-selection-select", {
+        detail: {
+          pageId: state.page?.id || requestedPageId || document.body.dataset.pageKey || "",
+          layerPath,
+        },
+      }),
+    );
 
+    activatePreviewHoverForElement(element);
     window.requestAnimationFrame(syncPreviewLayerStateFromDom);
     return true;
   }
@@ -3417,11 +3948,17 @@
     const tabs = getModeTabs();
     const breakpointMode = getBreakpointMode();
     const cssFilteredView = isCssFilteredViewActive();
-    const editorBodyClass = `preview-dev-panel__body${cssFilteredView ? " has-filter-footer" : ""}`;
-    const cssFilterFooter = cssFilteredView
+    const jsFilteredView = isJsFilteredViewActive();
+    const filteredView = cssFilteredView || jsFilteredView;
+    const emptyCode = (state.mode === "css" || state.mode === "js") && !hasAvailableCode(state.editorValue);
+    const editorBodyClass = `preview-dev-panel__body${filteredView ? " has-filter-footer" : ""}${emptyCode ? " is-empty-code" : ""}`;
+    const emptyCodeMessage = emptyCode
+      ? `<div class="preview-dev-panel__empty-message" data-preview-dev-empty-message>No available code</div>`
+      : `<div class="preview-dev-panel__empty-message" data-preview-dev-empty-message hidden>No available code</div>`;
+    const filterFooter = filteredView
       ? `
-        <div class="preview-dev-panel__filter-footer" data-preview-dev-css-filter-footer>
-          <button type="button" class="preview-dev-panel__see-all" data-preview-dev-css-see-all>See All</button>
+        <div class="preview-dev-panel__filter-footer" ${cssFilteredView ? "data-preview-dev-css-filter-footer" : "data-preview-dev-js-filter-footer"}>
+          <button type="button" class="preview-dev-panel__see-all" ${cssFilteredView ? "data-preview-dev-css-see-all" : "data-preview-dev-js-see-all"}>See All</button>
         </div>
       `
       : "";
@@ -3467,7 +4004,8 @@
                   <div class="preview-dev-panel__layer-gutter" data-preview-dev-layer-gutter></div>
                   <pre class="preview-dev-panel__code" data-preview-dev-code aria-hidden="true"><code>${highlightCode(state.editorValue, state.mode)}\n</code></pre>
                   <textarea class="preview-dev-panel__editor" data-preview-dev-editor spellcheck="false" aria-label="${escapeHtml(state.mode)} editor">${escapeHtml(state.editorValue)}</textarea>
-                  ${cssFilterFooter}
+                  ${emptyCodeMessage}
+                  ${filterFooter}
                 </div>
               </div>
               <div class="preview-dev-panel__split-pane preview-dev-panel__split-pane--overrides" data-preview-dev-overrides-pane>
@@ -3492,7 +4030,8 @@
               <div class="preview-dev-panel__layer-gutter" data-preview-dev-layer-gutter></div>
               <pre class="preview-dev-panel__code" data-preview-dev-code aria-hidden="true"><code>${highlightCode(state.editorValue, state.mode)}\n</code></pre>
               <textarea class="preview-dev-panel__editor" data-preview-dev-editor spellcheck="false" aria-label="${escapeHtml(state.mode)} editor">${escapeHtml(state.editorValue)}</textarea>
-              ${cssFilterFooter}
+              ${emptyCodeMessage}
+              ${filterFooter}
             </div>
           `
       }
@@ -3613,31 +4152,30 @@
 
       const layerToggle = target.closest("[data-preview-dev-layer-toggle]");
 
-      if (!layerToggle) {
-        const splitResizeHandle = target.closest("[data-preview-dev-split-resize-handle]");
-
-        if (splitResizeHandle) {
-          event.preventDefault();
-          event.stopPropagation();
-          startOverridesPaneResize(event);
-          return;
-        }
-
-        const resizeHandle = target.closest("[data-preview-dev-resize-handle]");
-
-        if (resizeHandle) {
-          event.preventDefault();
-          event.stopPropagation();
-          startPanelResize(event);
-        }
-
+      if (layerToggle) {
+        event.preventDefault();
+        event.stopPropagation();
+        state.layerTogglePointerActivatedUntil = performance.now() + 350;
+        activateHtmlLayerVisibilityToggle(layerToggle);
         return;
       }
 
-      event.preventDefault();
-      event.stopPropagation();
-      const line = Number.parseInt(String(layerToggle.getAttribute("data-preview-dev-line") || ""), 10);
-      toggleHtmlLayerVisibility(line);
+      const splitResizeHandle = target.closest("[data-preview-dev-split-resize-handle]");
+
+      if (splitResizeHandle) {
+        event.preventDefault();
+        event.stopPropagation();
+        startOverridesPaneResize(event);
+        return;
+      }
+
+      const resizeHandle = target.closest("[data-preview-dev-resize-handle]");
+
+      if (resizeHandle) {
+        event.preventDefault();
+        event.stopPropagation();
+        startPanelResize(event);
+      }
     },
     true,
   );
@@ -3667,6 +4205,7 @@
 
       if (element instanceof Element) {
         state.allowCssRefilterFromSelection = true;
+        state.allowJsRefilterFromSelection = true;
       }
     },
     true
@@ -3694,9 +4233,8 @@
     if (layerToggle) {
       event.preventDefault();
       event.stopPropagation();
-      const line = Number.parseInt(String(layerToggle.getAttribute("data-preview-dev-line") || ""), 10);
-      if (event.detail === 0) {
-        toggleHtmlLayerVisibility(line);
+      if (performance.now() > Number(state.layerTogglePointerActivatedUntil || 0)) {
+        activateHtmlLayerVisibilityToggle(layerToggle);
       }
       return;
     }
@@ -3707,12 +4245,32 @@
       event.preventDefault();
       const mergedCss = getCssOutputValue();
       state.cssShowAll = true;
-      state.cssFullValue = mergedCss;
-      state.editorValue = mergedCss;
+      state.cssFullValue = formatCssForEditor(mergedCss);
+      state.editorValue = formatCssForEditor(mergedCss);
       state.dirty = true;
       state.error = "";
       state.status = "";
       state.hoveredCssRule = null;
+      activatePreviewHoverForElements([]);
+      resetCodeHistory();
+      applyLivePreview();
+      scheduleAutosave();
+      render();
+      return;
+    }
+
+    const jsSeeAll = target.closest("[data-preview-dev-js-see-all]");
+
+    if (jsSeeAll) {
+      event.preventDefault();
+      const mergedJs = getJsOutputValue();
+      state.jsShowAll = true;
+      state.jsFullValue = mergedJs;
+      state.editorValue = mergedJs;
+      state.dirty = true;
+      state.error = "";
+      state.status = "";
+      state.hoveredJsBlock = null;
       activatePreviewHoverForElements([]);
       resetCodeHistory();
       applyLivePreview();
@@ -3734,10 +4292,10 @@
 
       state.mode = nextMode;
       if (state.mode === "css") {
-        state.cssFullValue = String(getPreview().css || "");
+        state.cssFullValue = formatCssForEditor(getEffectivePreview().css || "");
         state.cssFilterSignature = getCssFilterSignature();
       } else if (state.mode === "js") {
-        state.jsFullValue = String(getPreview().js || "");
+        state.jsFullValue = String(getEffectivePreview().js || "");
         state.jsFilterSignature = getJsFilterSignature();
       }
       state.editorValue = getContentForMode(nextMode);
@@ -3755,11 +4313,20 @@
     }
 
     if (target instanceof HTMLTextAreaElement && target.matches("[data-preview-dev-editor]")) {
+      if (state.mode === "html") {
+        const line = getHtmlLayerLineFromPointer(event);
+
+        if (line >= 0) {
+          state.suppressHtmlCaretSelectUntil = performance.now() + 250;
+          selectPreviewElementForHtmlLine(line);
+        }
+
+        return;
+      }
+
       window.requestAnimationFrame(() => {
         syncLineNumbers();
-        if (state.mode === "html") {
-          selectPreviewElementForEditorCaret(target);
-        } else if (state.mode === "css") {
+        if (state.mode === "css") {
           const rule = getCssRuleFromPointer(event);
           const element = getPreviewElementsForCssRule(rule)[0] || null;
 
@@ -3975,6 +4542,10 @@
     window.requestAnimationFrame(() => {
       syncLineNumbers();
       if (state.mode === "html") {
+        if (performance.now() < Number(state.suppressHtmlCaretSelectUntil || 0)) {
+          return;
+        }
+
         selectPreviewElementForEditorCaret(target);
       }
     });
@@ -4093,7 +4664,9 @@
       breakpointOverrides: preview.breakpointOverrides || {},
     };
 
-    if (state.mode === "html") {
+    if (getBreakpointMode() && state.mode !== "overrides") {
+      payload.syncBase = false;
+    } else if (state.mode === "html") {
       payload.html = state.editorValue;
     } else if (state.mode === "css") {
       payload.css = getCssOutputValue();
@@ -4107,7 +4680,17 @@
   }
 
   async function autosave() {
-    if (!state.page || !state.project || state.saving) {
+    if (!state.page || !state.project) {
+      return;
+    }
+
+    if (state.saving) {
+      if (!state.autosaveTimer) {
+        state.autosaveTimer = window.setTimeout(() => {
+          state.autosaveTimer = 0;
+          void autosave();
+        }, 250);
+      }
       return;
     }
 
@@ -4191,9 +4774,9 @@
 
     state.project = project || null;
     state.page = page;
-    state.cssFullValue = String(getPreview().css || "");
+    state.cssFullValue = formatCssForEditor(getEffectivePreview().css || "");
     state.cssFilterSignature = state.mode === "css" ? getCssFilterSignature() : "";
-    state.jsFullValue = String(getPreview().js || "");
+    state.jsFullValue = String(getEffectivePreview().js || "");
     state.jsFilterSignature = state.mode === "js" ? getJsFilterSignature() : "";
 
     if (!state.dirty) {
