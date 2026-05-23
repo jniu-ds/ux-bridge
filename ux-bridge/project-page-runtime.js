@@ -79,6 +79,91 @@
     }
   }
 
+  const CODE_OVERRIDE_LAYER_PATH = "__preview_code__";
+  const CODE_OVERRIDE_ATTRS = {
+    html: "data-ux-preview-html",
+    css: "data-ux-preview-css",
+    js: "data-ux-preview-js",
+  };
+
+  function getBreakpointMode() {
+    return (
+      document.body.classList.contains("breakpoint-specific-active") ||
+      !!document.querySelector(".preview-inspector__content--breakpoint-specific-active")
+    );
+  }
+
+  function getInspectorBreakpoints() {
+    const defaults = [
+      { id: "mobile-xs", label: "Mobile & Extra Small", start: 320, end: 480 },
+      { id: "tablet-sm", label: "Tablet & Small", start: 481, end: 768 },
+      { id: "laptop-md", label: "Laptop & Medium", start: 769, end: 1024 },
+      { id: "desktop-lg", label: "Large Desktop", start: 1025, end: null },
+    ];
+    const configured = Array.isArray(state.project?.inspectorBreakpoints) ? state.project.inspectorBreakpoints : [];
+
+    return defaults.map((fallback, index) => {
+      const breakpoint = configured[index] && typeof configured[index] === "object" ? configured[index] : {};
+      const start = Number.parseInt(String(breakpoint.start ?? fallback.start), 10);
+      const rawEnd = breakpoint.end ?? fallback.end;
+      const end =
+        rawEnd == null || String(rawEnd).trim() === "" || String(rawEnd).trim().toLowerCase() === "none"
+          ? null
+          : Number.parseInt(String(rawEnd), 10);
+
+      return {
+        id: fallback.id,
+        label: String(breakpoint.label || fallback.label),
+        start: Number.isFinite(start) ? Math.max(0, start) : fallback.start,
+        end: Number.isFinite(end) && end > 0 ? end : null,
+      };
+    });
+  }
+
+  function getCurrentBreakpointId() {
+    const scopeLabel = document.querySelector("[data-preview-inspector-breakpoint-scope-label]");
+    const labelText = scopeLabel instanceof HTMLElement ? scopeLabel.textContent?.replace(/\+$/, "").trim() : "";
+    const breakpoints = getInspectorBreakpoints();
+    const matchedByLabel = breakpoints.find((breakpoint) => breakpoint.label === labelText);
+
+    if (getBreakpointMode() && matchedByLabel) {
+      return matchedByLabel.id;
+    }
+
+    const root = document.querySelector("[data-vibe-mobile-render]");
+    const width = root instanceof Element ? Math.round(root.getBoundingClientRect().width || 0) : 0;
+    const matchedByWidth = breakpoints.find((breakpoint) => width >= breakpoint.start && (breakpoint.end == null || width <= breakpoint.end));
+
+    return matchedByWidth?.id || breakpoints[breakpoints.length - 1]?.id || "";
+  }
+
+  function getEffectivePreview(preview = {}) {
+    if (!getBreakpointMode()) {
+      return preview || {};
+    }
+
+    const breakpointId = getCurrentBreakpointId();
+    const override = preview?.breakpointOverrides?.[CODE_OVERRIDE_LAYER_PATH]?.[breakpointId];
+    const attrs = override && typeof override === "object" && override.attrs && typeof override.attrs === "object" ? override.attrs : null;
+
+    if (!breakpointId || !attrs) {
+      return preview || {};
+    }
+
+    return {
+      ...(preview || {}),
+      html: Object.prototype.hasOwnProperty.call(attrs, CODE_OVERRIDE_ATTRS.html)
+        ? String(attrs[CODE_OVERRIDE_ATTRS.html] || "")
+        : String(preview?.html || ""),
+      css: Object.prototype.hasOwnProperty.call(attrs, CODE_OVERRIDE_ATTRS.css)
+        ? String(attrs[CODE_OVERRIDE_ATTRS.css] || "")
+        : String(preview?.css || ""),
+      js: Object.prototype.hasOwnProperty.call(attrs, CODE_OVERRIDE_ATTRS.js)
+        ? String(attrs[CODE_OVERRIDE_ATTRS.js] || "")
+        : String(preview?.js || ""),
+    };
+  }
+
   function getCurrentUserEmail() {
     return String(window.uxBridgeUser?.email || "").trim().toLowerCase();
   }
@@ -88,7 +173,7 @@
       return;
     }
 
-    const preview = page?.preview || page?.vibe?.appliedDraft;
+    const preview = getEffectivePreview(page?.preview || page?.vibe?.appliedDraft);
     const hasAppliedContent = Boolean(preview?.html);
 
     mobilePage.classList.toggle("mobile-page--empty", !hasAppliedContent);
