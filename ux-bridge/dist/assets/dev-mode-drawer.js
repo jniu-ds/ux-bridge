@@ -49,6 +49,7 @@
     codeHistoryLine: -1,
     renderingLivePreview: false,
     previewDomSyncFrame: 0,
+    codeEditingUntil: 0,
     panelWidth: 300,
     resizingPanel: false,
     resizeStartX: 0,
@@ -2801,6 +2802,12 @@
       return;
     }
 
+    const editor = panel.querySelector("[data-preview-dev-editor]");
+
+    if (!force && editor instanceof HTMLTextAreaElement && document.activeElement === editor && performance.now() < Number(state.codeEditingUntil || 0)) {
+      return;
+    }
+
     const currentSignature = state.cssFilterSignature;
     const nextSignature = getCssFilterSignature();
     const signatureChanged = nextSignature !== currentSignature;
@@ -2822,7 +2829,6 @@
     }
 
     const hadFilterFooter = Boolean(panel.querySelector("[data-preview-dev-css-filter-footer]"));
-    const editor = panel.querySelector("[data-preview-dev-editor]");
     const scrollTop = editor instanceof HTMLTextAreaElement ? editor.scrollTop : 0;
     const scrollLeft = editor instanceof HTMLTextAreaElement ? editor.scrollLeft : 0;
 
@@ -2850,6 +2856,12 @@
       return;
     }
 
+    const editor = panel.querySelector("[data-preview-dev-editor]");
+
+    if (!force && editor instanceof HTMLTextAreaElement && document.activeElement === editor && performance.now() < Number(state.codeEditingUntil || 0)) {
+      return;
+    }
+
     const currentSignature = state.jsFilterSignature;
     const nextSignature = getJsFilterSignature();
     const signatureChanged = nextSignature !== currentSignature;
@@ -2871,7 +2883,6 @@
     }
 
     const hadFilterFooter = Boolean(panel.querySelector("[data-preview-dev-js-filter-footer]"));
-    const editor = panel.querySelector("[data-preview-dev-editor]");
     const scrollTop = editor instanceof HTMLTextAreaElement ? editor.scrollTop : 0;
     const scrollLeft = editor instanceof HTMLTextAreaElement ? editor.scrollLeft : 0;
 
@@ -3002,6 +3013,16 @@
       return;
     }
 
+    const editor = panel.querySelector("[data-preview-dev-editor]");
+
+    if (editor instanceof HTMLTextAreaElement && document.activeElement === editor) {
+      return;
+    }
+
+    if (performance.now() < Number(state.codeEditingUntil || 0)) {
+      return;
+    }
+
     const nextHtml = getCleanPreviewHtmlFromDom();
     const nextValue = formatHtmlForEditor(nextHtml);
 
@@ -3009,7 +3030,6 @@
       return;
     }
 
-    const editor = panel.querySelector("[data-preview-dev-editor]");
     const scrollTop = editor instanceof HTMLTextAreaElement ? editor.scrollTop : 0;
     const scrollLeft = editor instanceof HTMLTextAreaElement ? editor.scrollLeft : 0;
     state.editorValue = nextValue;
@@ -3854,7 +3874,10 @@
 
     state.error = "";
     updateLocalPreview(nextPreview);
+    const previewScrollSnapshot = capturePreviewScrollSnapshot();
     renderLivePreview(getEffectivePreview(nextPreview, { requireBreakpointMode: false }));
+    restorePreviewScrollSnapshot(previewScrollSnapshot);
+    window.requestAnimationFrame(() => restorePreviewScrollSnapshot(previewScrollSnapshot));
     if (state.mode !== "overrides") {
       syncOverridesEditorFromState();
     }
@@ -4407,6 +4430,7 @@
     }
 
     if (target.matches("[data-preview-dev-overrides-editor]")) {
+      state.codeEditingUntil = performance.now() + 1200;
       state.overridesValue = target.value;
       state.overridesDirty = true;
       state.status = "";
@@ -4422,6 +4446,7 @@
     }
 
     state.editorValue = target.value;
+    state.codeEditingUntil = performance.now() + 1200;
     state.dirty = true;
     state.status = "";
     state.error = "";
