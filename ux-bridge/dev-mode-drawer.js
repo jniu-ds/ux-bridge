@@ -3875,7 +3875,7 @@
     state.error = "";
     updateLocalPreview(nextPreview);
     const previewScrollSnapshot = capturePreviewScrollSnapshot();
-    renderLivePreview(getEffectivePreview(nextPreview, { requireBreakpointMode: false }));
+    renderLivePreview(getEffectivePreview(nextPreview));
     restorePreviewScrollSnapshot(previewScrollSnapshot);
     window.requestAnimationFrame(() => restorePreviewScrollSnapshot(previewScrollSnapshot));
     if (state.mode !== "overrides") {
