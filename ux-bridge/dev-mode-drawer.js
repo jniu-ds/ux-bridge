@@ -645,7 +645,6 @@
       background: transparent;
       opacity: 0;
       pointer-events: none;
-      transform: translateY(-2px);
       transition: opacity 0.12s ease, color 0.12s ease, background 0.12s ease;
     }
 
@@ -3299,7 +3298,7 @@
 
     gutter.innerHTML = visibleRows
       .map((row) => {
-        const top = paddingTop + row.line * lineHeight - scrollTop;
+        const top = paddingTop + row.line * lineHeight + (lineHeight - 22) / 2 - scrollTop;
         const visibleClass = row.line === hoverLine || row.hidden ? " is-visible" : "";
         const hiddenClass = row.hidden ? " is-hidden" : "";
         const label = row.hidden ? "Unhide HTML layer" : "Hide HTML layer";
