@@ -59,6 +59,7 @@
     overridesResizeStartY: 0,
     overridesResizeStartHeight: 0,
     overridesDirty: false,
+    pendingBreakpointCodeSave: false,
     overridesSyncTimer: 0,
     layerTogglePointerActivatedUntil: 0,
   };
@@ -638,11 +639,17 @@
       display: grid;
       width: 22px;
       height: 22px;
+      box-sizing: border-box;
+      padding: 0;
       place-items: center;
+      appearance: none;
+      -webkit-appearance: none;
       border: 0;
       border-radius: 999px;
       color: #94a3b8;
       background: transparent;
+      line-height: 0;
+      overflow: visible;
       opacity: 0;
       pointer-events: none;
       transition: opacity 0.12s ease, color 0.12s ease, background 0.12s ease;
@@ -670,6 +677,7 @@
     }
 
     .preview-dev-panel__layer-toggle svg {
+      display: block;
       width: 15px;
       height: 15px;
       fill: none;
@@ -3754,6 +3762,7 @@
         };
         nextPreview.breakpointOverrides = overrides;
         state.overridesValue = JSON.stringify(overrides, null, 2);
+        state.pendingBreakpointCodeSave = true;
       }
     } else if (state.mode === "html") {
       nextPreview.html = state.editorValue;
@@ -4682,7 +4691,7 @@
       breakpointOverrides: preview.breakpointOverrides || {},
     };
 
-    if (getBreakpointMode() && state.mode !== "overrides") {
+    if ((getBreakpointMode() || state.pendingBreakpointCodeSave) && state.mode !== "overrides") {
       payload.syncBase = false;
     } else if (state.mode === "html") {
       payload.html = state.editorValue;
@@ -4765,6 +4774,7 @@
         }
       }
       applyProject(result.project, payload.page);
+      state.pendingBreakpointCodeSave = false;
       state.dirty = savedEditorKey === "overrides" ? wasDirty : !canMarkClean && wasDirty;
       state.overridesDirty = savedEditorKey === "overrides" ? !canMarkClean && wasOverridesDirty : wasOverridesDirty;
       if (canMarkClean) {
