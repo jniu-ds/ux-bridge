@@ -4041,7 +4041,7 @@
                   <div class="preview-dev-panel__row-highlights" data-preview-dev-overrides-row-highlights></div>
                   <div class="preview-dev-panel__line-numbers" data-preview-dev-overrides-line-numbers aria-hidden="true"></div>
                   <pre class="preview-dev-panel__code" data-preview-dev-overrides-code aria-hidden="true"><code>${highlightCode(state.overridesValue, "overrides")}\n</code></pre>
-                  <textarea class="preview-dev-panel__editor" data-preview-dev-overrides-editor spellcheck="false" aria-label="Overrides editor">${escapeHtml(state.overridesValue)}</textarea>
+                  <textarea class="preview-dev-panel__editor" data-preview-dev-overrides-editor spellcheck="false" aria-label="Overrides viewer" readonly aria-readonly="true">${escapeHtml(state.overridesValue)}</textarea>
                 </div>
               </div>
             </div>
@@ -4430,14 +4430,8 @@
     }
 
     if (target.matches("[data-preview-dev-overrides-editor]")) {
-      state.codeEditingUntil = performance.now() + 1200;
-      state.overridesValue = target.value;
-      state.overridesDirty = true;
-      state.status = "";
-      state.error = "";
+      target.value = state.overridesValue;
       syncHighlightText();
-      applyLivePreview();
-      scheduleAutosave("overrides");
       return;
     }
 
@@ -4647,7 +4641,7 @@
       return;
     }
 
-    if (isOverridesEditor && (event.metaKey || event.ctrlKey) && (event.key.toLowerCase() === "z" || event.key.toLowerCase() === "y")) {
+    if (isOverridesEditor) {
       return;
     }
 
