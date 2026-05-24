@@ -1262,6 +1262,11 @@
     };
   }
 
+  function hasAnyBreakpointOverrides(preview = getPreview()) {
+    const overrides = preview?.breakpointOverrides;
+    return !!(overrides && typeof overrides === "object" && Object.keys(overrides).length);
+  }
+
   function getEffectivePreview(preview = getPreview(), options = {}) {
     const requireBreakpointMode = options.requireBreakpointMode === true;
 
@@ -2572,6 +2577,60 @@
     return element;
   }
 
+  function applyBreakpointLayerOverridesToDom(preview = getPreview()) {
+    const overrides = preview?.breakpointOverrides;
+
+    if (!overrides || typeof overrides !== "object") {
+      return;
+    }
+
+    Object.entries(overrides).forEach(([layerPath]) => {
+      const path = String(layerPath || "").trim();
+
+      if (!path || path === CODE_OVERRIDE_LAYER_PATH) {
+        return;
+      }
+
+      const element = getPreviewElementForLayerPath(path);
+      const override = getEffectiveBreakpointOverride(path, overrides);
+
+      if (!(element instanceof HTMLElement) || !override || typeof override !== "object") {
+        return;
+      }
+
+      const styles = override.styles && typeof override.styles === "object" ? override.styles : {};
+      const attrs = override.attrs && typeof override.attrs === "object" ? override.attrs : {};
+
+      Object.entries(styles).forEach(([property, value]) => {
+        const key = String(property || "").trim();
+
+        if (!key) {
+          return;
+        }
+
+        element.style[key] = value == null || value === "" ? "" : String(value);
+      });
+
+      Object.entries(attrs).forEach(([attribute, value]) => {
+        const key = String(attribute || "").trim();
+
+        if (!key) {
+          return;
+        }
+
+        if (value == null) {
+          element.removeAttribute(key);
+        } else {
+          element.setAttribute(key, String(value));
+        }
+      });
+
+      if (Object.prototype.hasOwnProperty.call(override, "text")) {
+        element.textContent = String(override.text || "");
+      }
+    });
+  }
+
   function getHtmlLayerRowByLine(line) {
     return getHtmlLayerRows().find((row) => row.line === line) || null;
   }
@@ -3126,6 +3185,11 @@
     }
 
     if (performance.now() < Number(state.codeEditingUntil || 0)) {
+      return;
+    }
+
+    const preview = getPreview();
+    if (!getBreakpointMode() && (hasAnyBreakpointOverrides(preview) || getPreviewCodeOverride(preview))) {
       return;
     }
 
@@ -3961,6 +4025,7 @@
       style.textContent = String(nextPreview.css || "");
       renderRoot.innerHTML = String(nextPreview.html || "");
       runLivePreviewScript(renderRoot, nextPreview);
+      applyBreakpointLayerOverridesToDom(nextPreview);
     } finally {
       window.requestAnimationFrame(() => {
         state.renderingLivePreview = false;
