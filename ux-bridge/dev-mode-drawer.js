@@ -63,6 +63,8 @@
     overridesSyncTimer: 0,
     layerTogglePointerActivatedUntil: 0,
     layoutChangeFrame: 0,
+    layoutSettleTimer: 0,
+    drawerLayoutSignature: "",
   };
   let previewStateObserver = null;
   const previewHoverOverlays = [];
@@ -1524,6 +1526,51 @@
       state.layoutChangeFrame = 0;
       emitDevModeLayoutChange();
     });
+  }
+
+  function emitSettledDevModeLayoutChange() {
+    syncLayout();
+    emitDevModeLayoutChange();
+    window.requestAnimationFrame(() => {
+      syncLayout();
+      emitDevModeLayoutChange();
+      window.requestAnimationFrame(() => {
+        syncLayout();
+        emitDevModeLayoutChange();
+      });
+    });
+
+    if (state.layoutSettleTimer) {
+      window.clearTimeout(state.layoutSettleTimer);
+    }
+
+    state.layoutSettleTimer = window.setTimeout(() => {
+      state.layoutSettleTimer = 0;
+      syncLayout();
+      emitDevModeLayoutChange();
+    }, 160);
+  }
+
+  function getDrawerLayoutSignature() {
+    return [
+      document.body.classList.contains("inspector-open") ? "inspector" : "",
+      document.body.classList.contains("vibe-open") ? "vibe" : "",
+      document.body.classList.contains("comments-open") ? "comments" : "",
+      document.body.classList.contains("uploads-open") ? "uploads" : "",
+      document.body.classList.contains("customizer-open") ? "customizer" : "",
+      document.body.classList.contains("preview-dev-open") ? "dev" : "",
+    ].join("|");
+  }
+
+  function emitLayoutChangeIfDrawerStateChanged() {
+    const signature = getDrawerLayoutSignature();
+
+    if (signature === state.drawerLayoutSignature) {
+      return;
+    }
+
+    state.drawerLayoutSignature = signature;
+    emitSettledDevModeLayoutChange();
   }
 
   function setDevModeLayoutState(nextState = {}) {
@@ -4356,7 +4403,7 @@
     }
 
     render();
-    emitDevModeLayoutChange();
+    emitSettledDevModeLayoutChange();
   }
 
   panel.addEventListener(
@@ -5097,6 +5144,7 @@
 
   const mutationObserver = new MutationObserver(() => {
     const nextBreakpointMode = getBreakpointMode();
+    emitLayoutChangeIfDrawerStateChanged();
 
     if (!state.open) {
       syncToggleState();
