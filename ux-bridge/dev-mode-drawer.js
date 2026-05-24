@@ -4856,7 +4856,9 @@
       breakpointOverrides: preview.breakpointOverrides || {},
     };
 
-    if ((getBreakpointMode() || state.pendingBreakpointCodeSave) && state.mode !== "overrides") {
+    const hasScopedCodeOverride = Boolean(getPreviewCodeOverride(preview));
+
+    if ((getBreakpointMode() || state.pendingBreakpointCodeSave || hasScopedCodeOverride) && state.mode !== "overrides") {
       payload.syncBase = false;
     } else if (state.mode === "html") {
       payload.html = state.editorValue;
