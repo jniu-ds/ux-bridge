@@ -3073,11 +3073,11 @@
     state.error = "";
     state.status = "";
 
-    if (state.page?.preview) {
+    if (!getBreakpointMode() && state.page?.preview) {
       state.page.preview = { ...state.page.preview, html: nextHtml };
     }
 
-    if (state.page?.vibe?.appliedDraft) {
+    if (!getBreakpointMode() && state.page?.vibe?.appliedDraft) {
       state.page.vibe.appliedDraft = { ...state.page.vibe.appliedDraft, html: nextHtml };
     }
 
