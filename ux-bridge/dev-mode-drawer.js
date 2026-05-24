@@ -62,6 +62,7 @@
     pendingBreakpointCodeSave: false,
     overridesSyncTimer: 0,
     layerTogglePointerActivatedUntil: 0,
+    layoutChangeFrame: 0,
   };
   let previewStateObserver = null;
   const previewHoverOverlays = [];
@@ -1514,6 +1515,17 @@
     }
   }
 
+  function scheduleDevModeLayoutChange() {
+    if (state.layoutChangeFrame) {
+      return;
+    }
+
+    state.layoutChangeFrame = window.requestAnimationFrame(() => {
+      state.layoutChangeFrame = 0;
+      emitDevModeLayoutChange();
+    });
+  }
+
   function setDevModeLayoutState(nextState = {}) {
     const nextPanelWidth = Number(nextState.panelWidth);
     const nextOverridesPaneHeight = Number(nextState.overridesPaneHeight);
@@ -1568,6 +1580,7 @@
     const delta = state.resizeStartX - event.clientX;
     state.panelWidth = Math.max(300, Math.min(getMaxPanelWidth(), Math.round(state.resizeStartWidth + delta)));
     syncLayout();
+    scheduleDevModeLayoutChange();
     schedulePreviewHoverOverlaySync();
   }
 
