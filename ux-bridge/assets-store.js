@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { del, get, put } from "@vercel/blob";
+import { handleUpload } from "@vercel/blob/client";
 import { getAuthenticatedUser, readJsonBody, sendJson } from "./auth-store.js";
 import { getBlobConfig, isBlobConfigured } from "./db/config.js";
 import { deleteAssetRecord, listAssetRecords, readAssetRecord, writeAssetRecord } from "./db/assets.js";
@@ -8,10 +9,13 @@ import { userHasPermission } from "./permissions-store.js";
 import { getProjectStructureById, projectHasPage, userCanAccessProject } from "./projects-store.js";
 
 const MAX_SERVER_UPLOAD_BYTES = 4 * 1024 * 1024;
+const MAX_DIRECT_UPLOAD_BYTES = 10 * 1024 * 1024;
 const ASSET_KIND_IMAGE = "image";
 const ASSET_KIND_VIDEO = "video";
 const ASSET_KIND_PDF = "pdf";
 const ASSET_KIND_FILE = "file";
+const CLIENT_UPLOAD_EVENT_GENERATE_TOKEN = "blob.generate-client-token";
+const CLIENT_UPLOAD_EVENT_COMPLETED = "blob.upload-completed";
 
 function sanitizeFileName(value = "") {
   const input = String(value || "").trim();
@@ -69,6 +73,98 @@ function buildBlobPathname(projectId, pageId, fileName) {
   const stamp = Date.now();
   const token = crypto.randomUUID().slice(0, 8);
   return `projects/${projectId}/pages/${pageId}/${stamp}-${token}-${safeFileName}`;
+}
+
+function parseClientUploadPayload(clientPayload = "") {
+  if (!clientPayload) {
+    return {};
+  }
+
+  try {
+    const parsed = JSON.parse(String(clientPayload || ""));
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function normalizeClientUploadMaxBytes(value, contentType = "") {
+  const requested = Math.max(0, Number(value) || 0);
+  const lowerContentType = normalizeContentType(contentType);
+  const defaultMax = lowerContentType.startsWith("video/") ? MAX_DIRECT_UPLOAD_BYTES : MAX_DIRECT_UPLOAD_BYTES;
+  return Math.max(1, Math.min(requested || defaultMax, MAX_DIRECT_UPLOAD_BYTES));
+}
+
+function allowedClientUploadContentTypes(contentType = "") {
+  const normalized = normalizeContentType(contentType);
+
+  if (normalized && normalized !== "application/octet-stream") {
+    return [normalized];
+  }
+
+  return [
+    "image/webp",
+    "image/avif",
+    "image/jpeg",
+    "image/png",
+    "image/svg+xml",
+    "video/mp4",
+    "application/pdf",
+    "application/octet-stream",
+  ];
+}
+
+async function handleClientUploadRequest({ req, user, body }) {
+  if (!isBlobConfigured()) {
+    throw new Error("Blob storage is not configured.");
+  }
+
+  const result = await handleUpload({
+    request: req,
+    body,
+    token: getBlobConfig().token || process.env.BLOB_READ_WRITE_TOKEN,
+    onBeforeGenerateToken: async (pathname, clientPayload) => {
+      const payload = parseClientUploadPayload(clientPayload);
+      const projectId = String(payload.project || "").trim();
+      const pageId = String(payload.page || "").trim();
+      const contentType = normalizeContentType(payload.contentType);
+      const expectedPrefix = projectId && pageId ? `projects/${projectId}/pages/${pageId}/` : "";
+
+      if (!projectId || !pageId || !expectedPrefix || !String(pathname || "").startsWith(expectedPrefix)) {
+        throw new Error("Choose a valid upload target.");
+      }
+
+      if (!(await userCanAccessProject(user, projectId))) {
+        throw new Error("You do not have access to this project.");
+      }
+
+      if (!projectHasPage(projectId, pageId)) {
+        throw new Error("Page not found.");
+      }
+
+      return {
+        addRandomSuffix: false,
+        allowOverwrite: false,
+        allowedContentTypes: allowedClientUploadContentTypes(contentType),
+        maximumSizeInBytes: normalizeClientUploadMaxBytes(payload.maxSizeInBytes, contentType),
+        tokenPayload: JSON.stringify({
+          project: projectId,
+          page: pageId,
+          fileName: sanitizeFileName(payload.fileName),
+          contentType,
+          commentId: String(payload.commentId || "").trim(),
+          scope: String(payload.scope || "").trim(),
+          layerPath: String(payload.layerPath || "").trim(),
+          backgroundMode: String(payload.backgroundMode || "").trim().toLowerCase(),
+        }),
+      };
+    },
+  });
+
+  return {
+    status: 200,
+    payload: result,
+  };
 }
 
 function sanitizeAssetRecord(asset) {
@@ -133,6 +229,51 @@ async function uploadPrivateAsset({ projectId, pageId, uploadedBy, fileName, con
     downloadUrl: String(blob.downloadUrl || ""),
     createdAt: now,
     updatedAt: now,
+  };
+
+  await writeAssetRecord(asset);
+  return sanitizeAssetRecord(asset);
+}
+
+async function finalizeDirectUploadedAsset({
+  projectId,
+  pageId,
+  uploadedBy,
+  fileName,
+  contentType,
+  pathname,
+  url,
+  downloadUrl,
+  sizeBytes,
+  commentId = "",
+}) {
+  const normalizedProjectId = String(projectId || "").trim();
+  const normalizedPageId = String(pageId || "").trim();
+  const normalizedUploadedBy = String(uploadedBy || "").trim().toLowerCase();
+  const normalizedFileName = sanitizeFileName(fileName);
+  const normalizedContentType = normalizeContentType(contentType);
+  const normalizedPathname = String(pathname || "").trim();
+  const expectedPrefix = normalizedProjectId && normalizedPageId ? `projects/${normalizedProjectId}/pages/${normalizedPageId}/` : "";
+
+  if (!normalizedProjectId || !normalizedPageId || !normalizedUploadedBy || !normalizedPathname || !String(normalizedPathname).startsWith(expectedPrefix)) {
+    throw new Error("Choose a valid upload target.");
+  }
+
+  const asset = {
+    id: crypto.randomUUID(),
+    projectId: normalizedProjectId,
+    pageId: normalizedPageId,
+    commentId: String(commentId || "").trim(),
+    uploadedBy: normalizedUploadedBy,
+    fileName: normalizedFileName,
+    kind: inferAssetKind(normalizedContentType, normalizedFileName),
+    contentType: normalizedContentType,
+    sizeBytes: Math.max(0, Number(sizeBytes) || 0),
+    blobPathname: normalizedPathname,
+    blobUrl: String(url || "").trim(),
+    downloadUrl: String(downloadUrl || "").trim(),
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
   };
 
   await writeAssetRecord(asset);
@@ -310,6 +451,25 @@ export async function handleAssetsRequest(req) {
   }
 
   const payload = await readJsonBody(req);
+
+  if (payload?.type === CLIENT_UPLOAD_EVENT_GENERATE_TOKEN || payload?.type === CLIENT_UPLOAD_EVENT_COMPLETED) {
+    try {
+      return await handleClientUploadRequest({
+        req,
+        user,
+        body: payload,
+      });
+    } catch (error) {
+      return {
+        status: 400,
+        payload: {
+          ok: false,
+          error: error instanceof Error ? error.message : "Unable to prepare upload.",
+        },
+      };
+    }
+  }
+
   const action = String(payload?.action || "").trim();
 
   if (action === "uploadAsset") {
@@ -382,6 +542,85 @@ export async function handleAssetsRequest(req) {
         payload: {
           ok: false,
           error: error instanceof Error ? error.message : "Unable to upload asset.",
+        },
+      };
+    }
+  }
+
+  if (action === "finalizeUploadedAsset") {
+    const projectId = String(payload.project || "").trim();
+    const pageId = String(payload.page || "").trim();
+
+    if (!projectId || !pageId) {
+      return {
+        status: 400,
+        payload: {
+          ok: false,
+          error: "Choose a valid upload target.",
+        },
+      };
+    }
+
+    if (!(await userCanAccessProject(user, projectId))) {
+      return {
+        status: 403,
+        payload: {
+          ok: false,
+          error: "You do not have access to this project.",
+        },
+      };
+    }
+
+    if (!projectHasPage(projectId, pageId)) {
+      return {
+        status: 404,
+        payload: {
+          ok: false,
+          error: "Page not found.",
+        },
+      };
+    }
+
+    try {
+      const asset = await finalizeDirectUploadedAsset({
+        projectId,
+        pageId,
+        uploadedBy: user.email,
+        fileName: payload.fileName,
+        contentType: payload.contentType,
+        pathname: payload.pathname,
+        url: payload.url,
+        downloadUrl: payload.downloadUrl,
+        sizeBytes: payload.sizeBytes,
+        commentId: payload.commentId,
+      });
+
+      await captureOperationalEvent({
+        name: "asset.uploaded",
+        level: "info",
+        context: {
+          projectId,
+          pageId,
+          assetId: asset.id,
+          contentType: asset.contentType,
+          sizeBytes: asset.sizeBytes,
+          uploadMode: "direct",
+        },
+      });
+
+      return {
+        status: 200,
+        payload: {
+          ok: true,
+          asset,
+        },
+      };
+    } catch (error) {
+      return {
+        status: 400,
+        payload: {
+          ok: false,
+          error: error instanceof Error ? error.message : "Unable to finalize upload.",
         },
       };
     }
