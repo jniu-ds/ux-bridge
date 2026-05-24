@@ -510,6 +510,11 @@
       color: #f3e8ff;
     }
 
+    .preview-dev-panel__line-number.is-breakpoint-overridden {
+      color: #d8b4fe;
+      font-weight: 800;
+    }
+
     .preview-dev-panel__row-highlight {
       position: absolute;
       left: 0;
@@ -532,6 +537,16 @@
     .preview-dev-panel.is-breakpoint-active .preview-dev-panel__row-highlight.is-selected {
       background: rgba(164, 41, 236, 0.22);
       box-shadow: inset 2px 0 0 rgba(164, 41, 236, 0.95);
+    }
+
+    .preview-dev-panel.is-breakpoint-active .preview-dev-panel__row-highlight.is-breakpoint-overridden {
+      background: rgba(164, 41, 236, 0.11);
+      box-shadow: inset 2px 0 0 rgba(164, 41, 236, 0.72);
+    }
+
+    .preview-dev-panel.is-breakpoint-active .preview-dev-panel__row-highlight.is-breakpoint-overridden.is-selected {
+      background: rgba(164, 41, 236, 0.24);
+      box-shadow: inset 2px 0 0 rgba(233, 213, 255, 0.95);
     }
 
     .preview-dev-panel__code code {
@@ -1202,12 +1217,41 @@
     return matchedByWidth?.id || breakpoints[breakpoints.length - 1]?.id || "";
   }
 
-  function getPreviewCodeOverride(preview = getPreview()) {
+  function getCurrentBreakpointIndex() {
+    const breakpoints = getInspectorBreakpoints();
     const breakpointId = getCurrentBreakpointId();
-    const override = preview?.breakpointOverrides?.[CODE_OVERRIDE_LAYER_PATH]?.[breakpointId];
+    const index = breakpoints.findIndex((breakpoint) => breakpoint.id === breakpointId);
+
+    return index >= 0 ? index : Math.max(0, breakpoints.length - 1);
+  }
+
+  function getEffectiveBreakpointOverride(layerPath, overrides = parseOverridesValue()) {
+    const path = String(layerPath || "").trim();
+    const layerOverrides = path && overrides && typeof overrides === "object" ? overrides[path] : null;
+
+    if (!path || !layerOverrides || typeof layerOverrides !== "object") {
+      return null;
+    }
+
+    const breakpoints = getInspectorBreakpoints();
+    const currentIndex = getCurrentBreakpointIndex();
+
+    for (let index = Math.min(currentIndex, breakpoints.length - 1); index >= 0; index -= 1) {
+      const breakpointId = breakpoints[index]?.id;
+
+      if (breakpointId && Object.prototype.hasOwnProperty.call(layerOverrides, breakpointId)) {
+        return layerOverrides[breakpointId];
+      }
+    }
+
+    return null;
+  }
+
+  function getPreviewCodeOverride(preview = getPreview()) {
+    const override = getEffectiveBreakpointOverride(CODE_OVERRIDE_LAYER_PATH, preview?.breakpointOverrides || {});
     const attrs = override && typeof override === "object" && override.attrs && typeof override.attrs === "object" ? override.attrs : null;
 
-    if (!breakpointId || !attrs) {
+    if (!attrs) {
       return null;
     }
 
@@ -1219,7 +1263,7 @@
   }
 
   function getEffectivePreview(preview = getPreview(), options = {}) {
-    const requireBreakpointMode = options.requireBreakpointMode !== false;
+    const requireBreakpointMode = options.requireBreakpointMode === true;
 
     if (requireBreakpointMode && !getBreakpointMode()) {
       return preview || {};
@@ -1691,12 +1735,21 @@
     const paddingTop = editor instanceof HTMLTextAreaElement ? getEditorMetric(editor, "padding-top", 14) : 14;
     const scrollTop = editor instanceof HTMLTextAreaElement ? editor.scrollTop || 0 : 0;
     const selectedLine = getSelectedCodeLine();
+    const overrideLines =
+      state.mode === "html"
+        ? new Set(
+            getHtmlLayerRows()
+              .filter((row) => isHtmlRowCurrentBreakpointOverridden(row))
+              .map((row) => row.line),
+          )
+        : new Set();
 
     lineNumbers.innerHTML = Array.from({ length: getEditorLineCount() }, (_, index) => {
       const top = paddingTop + index * lineHeight - scrollTop;
       const selectedClass = index === selectedLine ? " is-selected" : "";
+      const overrideClass = overrideLines.has(index) ? " is-breakpoint-overridden" : "";
 
-      return `<span class="preview-dev-panel__line-number${selectedClass}" style="top: ${top}px;">${index + 1}</span>`;
+      return `<span class="preview-dev-panel__line-number${selectedClass}${overrideClass}" style="top: ${top}px;">${index + 1}</span>`;
     }).join("");
 
     syncFilterFooterPosition();
@@ -1877,6 +1930,23 @@
       });
 
     return rows;
+  }
+
+  function getLayerPathForHtmlRow(row) {
+    if (!row || !Number.isInteger(row.ordinal)) {
+      return "";
+    }
+
+    const element = getPreviewLayerElements()[row.ordinal] || null;
+    return getPreviewLayerPathForElement(element);
+  }
+
+  function isHtmlRowCurrentBreakpointOverridden(row) {
+    if (!getBreakpointMode()) {
+      return false;
+    }
+
+    return hasCurrentBreakpointOverride(getLayerPathForHtmlRow(row));
   }
 
   function getCssRules(value = state.editorValue) {
@@ -3322,13 +3392,14 @@
     const scrollTop = editor.scrollTop || 0;
 
     if (rowHighlights instanceof HTMLElement) {
-      const highlightRows = getUniqueRowsByLine(rows.filter((row) => row.line === hoverLine || row.line === selectedLine));
+      const highlightRows = getUniqueRowsByLine(rows.filter((row) => row.line === hoverLine || row.line === selectedLine || isHtmlRowCurrentBreakpointOverridden(row)));
       rowHighlights.innerHTML = highlightRows
         .map((row) => {
           const top = paddingTop + row.line * lineHeight - scrollTop;
           const selectedClass = row.line === selectedLine ? " is-selected" : "";
+          const overrideClass = isHtmlRowCurrentBreakpointOverridden(row) ? " is-breakpoint-overridden" : "";
 
-          return `<div class="preview-dev-panel__row-highlight${selectedClass}" style="top: ${top}px; height: ${lineHeight}px;"></div>`;
+          return `<div class="preview-dev-panel__row-highlight${selectedClass}${overrideClass}" style="top: ${top}px; height: ${lineHeight}px;"></div>`;
         })
         .join("");
     }

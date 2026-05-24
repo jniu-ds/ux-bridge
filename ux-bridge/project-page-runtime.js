@@ -137,16 +137,41 @@
     return matchedByWidth?.id || breakpoints[breakpoints.length - 1]?.id || "";
   }
 
-  function getEffectivePreview(preview = {}) {
-    if (!getBreakpointMode()) {
-      return preview || {};
+  function getCurrentBreakpointIndex() {
+    const breakpoints = getInspectorBreakpoints();
+    const currentId = getCurrentBreakpointId();
+    const index = breakpoints.findIndex((breakpoint) => breakpoint.id === currentId);
+
+    return index >= 0 ? index : Math.max(0, breakpoints.length - 1);
+  }
+
+  function getEffectiveBreakpointOverride(preview = {}, layerPath = "") {
+    const path = String(layerPath || "").trim();
+    const overrides = path && preview?.breakpointOverrides?.[path];
+
+    if (!path || !overrides || typeof overrides !== "object") {
+      return null;
     }
 
-    const breakpointId = getCurrentBreakpointId();
-    const override = preview?.breakpointOverrides?.[CODE_OVERRIDE_LAYER_PATH]?.[breakpointId];
+    const breakpoints = getInspectorBreakpoints();
+    const currentIndex = getCurrentBreakpointIndex();
+
+    for (let index = Math.min(currentIndex, breakpoints.length - 1); index >= 0; index -= 1) {
+      const breakpointId = breakpoints[index]?.id;
+
+      if (breakpointId && Object.prototype.hasOwnProperty.call(overrides, breakpointId)) {
+        return overrides[breakpointId];
+      }
+    }
+
+    return null;
+  }
+
+  function getEffectivePreview(preview = {}) {
+    const override = getEffectiveBreakpointOverride(preview, CODE_OVERRIDE_LAYER_PATH);
     const attrs = override && typeof override === "object" && override.attrs && typeof override.attrs === "object" ? override.attrs : null;
 
-    if (!breakpointId || !attrs) {
+    if (!attrs) {
       return preview || {};
     }
 
