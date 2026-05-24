@@ -131,7 +131,14 @@
     }
 
     const root = document.querySelector("[data-vibe-mobile-render]");
-    const width = root instanceof Element ? Math.round(root.getBoundingClientRect().width || 0) : 0;
+    const responsiveWidth = Number.parseFloat(
+      window.getComputedStyle(document.documentElement).getPropertyValue("--preview-device-width"),
+    );
+    const width = Number.isFinite(responsiveWidth) && responsiveWidth > 0
+      ? Math.round(responsiveWidth)
+      : root instanceof Element
+        ? Math.round(root.getBoundingClientRect().width || 0)
+        : 0;
     const matchedByWidth = breakpoints.find((breakpoint) => width >= breakpoint.start && (breakpoint.end == null || width <= breakpoint.end));
 
     return matchedByWidth?.id || breakpoints[breakpoints.length - 1]?.id || "";

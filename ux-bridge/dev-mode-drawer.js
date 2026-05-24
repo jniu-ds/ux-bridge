@@ -1501,6 +1501,14 @@
           detail: getDevModeLayoutState(),
         }),
       );
+      window.dispatchEvent(
+        new CustomEvent("uxbridge:preview-layout-change", {
+          detail: {
+            source: "dev-mode",
+            ...getDevModeLayoutState(),
+          },
+        }),
+      );
     } catch {
       // Layout memory is best-effort and should never block editing.
     }
@@ -4335,6 +4343,7 @@
     }
 
     render();
+    emitDevModeLayoutChange();
   }
 
   panel.addEventListener(
