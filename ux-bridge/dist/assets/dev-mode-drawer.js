@@ -942,7 +942,7 @@
   }
 
   function formatHtmlForEditor(value) {
-    const source = String(value || "").trim();
+    const source = stripTransientPreviewAttributesFromHtml(value).trim();
 
     if (!source) {
       return "";
@@ -977,6 +977,46 @@
         return formatted;
       })
       .join("\n");
+  }
+
+  const TRANSIENT_PREVIEW_ATTRIBUTES = [
+    "data-ux-layer-hovered",
+    "data-ux-layer-selected",
+    "data-ux-layer-editing",
+    "data-ux-layer-candidate",
+    "data-ux-layer-drop-container",
+    "data-ux-layer-drag-source",
+  ];
+
+  function removeTransientPreviewAttributes(root) {
+    if (!(root instanceof Element) && !(root instanceof DocumentFragment)) {
+      return;
+    }
+
+    const elements = root instanceof Element ? [root, ...Array.from(root.querySelectorAll("*"))] : Array.from(root.querySelectorAll("*"));
+
+    elements.forEach((element) => {
+      if (!(element instanceof Element)) {
+        return;
+      }
+
+      TRANSIENT_PREVIEW_ATTRIBUTES.forEach((attribute) => {
+        element.removeAttribute(attribute);
+      });
+    });
+  }
+
+  function stripTransientPreviewAttributesFromHtml(value) {
+    const source = String(value || "").trim();
+
+    if (!source) {
+      return "";
+    }
+
+    const template = document.createElement("template");
+    template.innerHTML = source;
+    removeTransientPreviewAttributes(template.content);
+    return String(template.innerHTML || "").trim();
   }
 
   function formatCssForEditor(value) {
@@ -2997,18 +3037,7 @@
       return "";
     }
 
-    clone.querySelectorAll("[data-ux-layer-hovered], [data-ux-layer-selected]").forEach((element) => {
-      element.removeAttribute("data-ux-layer-hovered");
-      element.removeAttribute("data-ux-layer-selected");
-    });
-
-    if (clone.hasAttribute("data-ux-layer-hovered")) {
-      clone.removeAttribute("data-ux-layer-hovered");
-    }
-
-    if (clone.hasAttribute("data-ux-layer-selected")) {
-      clone.removeAttribute("data-ux-layer-selected");
-    }
+    removeTransientPreviewAttributes(clone);
 
     return clone.innerHTML;
   }
