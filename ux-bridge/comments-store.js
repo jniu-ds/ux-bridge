@@ -526,6 +526,26 @@ function sanitizeCommentAssets(value) {
     .filter((asset) => asset && asset.id && asset.fileName);
 }
 
+function sanitizeCommentLayer(value) {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const path = String(value.path || value.layerPath || "")
+    .trim()
+    .slice(0, 160);
+
+  if (!path) {
+    return null;
+  }
+
+  return {
+    path,
+    label: String(value.label || "").trim().slice(0, 80),
+    tagName: String(value.tagName || "").trim().toLowerCase().slice(0, 32),
+  };
+}
+
 function extractMentions(body, users) {
   return users
     .filter((candidate) => body.toLowerCase().includes(`@${candidate.fullName.toLowerCase()}`))
@@ -1054,6 +1074,7 @@ export async function handleCommentsRequest(req) {
   const body = sanitizeCommentBody(payload.body);
 
   const assets = sanitizeCommentAssets(payload.assets);
+  const layer = sanitizeCommentLayer(payload.layer);
 
   if (!body && !assets.length) {
     return {
@@ -1079,6 +1100,7 @@ export async function handleCommentsRequest(req) {
     },
     mentions,
     assets,
+    ...(layer ? { layer } : {}),
   };
 
   const comments = await readComments(project, page);
