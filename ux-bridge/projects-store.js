@@ -1594,6 +1594,118 @@ async function createProjectPage(project, user, name = "", options = {}) {
   };
 }
 
+function cloneJsonValue(value, fallback = null) {
+  if (value === undefined) {
+    return fallback;
+  }
+
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch {
+    return fallback;
+  }
+}
+
+function createDuplicatePageName(project, sourceName = "") {
+  const baseName = `${String(sourceName || "").trim() || "Page"} Copy`;
+  const existingNames = new Set(
+    (Array.isArray(project?.pages) ? project.pages : [])
+      .map((page) => String(page?.name || "").trim().toLowerCase())
+      .filter(Boolean),
+  );
+
+  if (!existingNames.has(baseName.toLowerCase())) {
+    return baseName;
+  }
+
+  let suffix = 2;
+
+  while (existingNames.has(`${baseName} ${suffix}`.toLowerCase())) {
+    suffix += 1;
+  }
+
+  return `${baseName} ${suffix}`;
+}
+
+function duplicateProjectPage(project, sourcePage, options = {}) {
+  const name = createDuplicatePageName(project, sourcePage?.name);
+  const pageShell = createPage(project, name, { source: "duplicate" });
+  const now = Date.now();
+  const snapshot = cloneJsonValue(sourcePage, {});
+  const page = normalizeProjectPage(
+    {
+      ...snapshot,
+      id: pageShell.id,
+      name,
+      createdAt: now,
+      createdFrom: "duplicate",
+      launchUrl: "",
+      fileSlug: "",
+      files: null,
+      pageLock: null,
+    },
+    project.id,
+  );
+  const rawIndex = Number(options.insertIndex);
+  const pageIndex = Array.isArray(project.pages)
+    ? project.pages.findIndex((entry) => entry.id === sourcePage.id)
+    : -1;
+  const beforePageId = normalizePageId(options.beforePageId);
+  const beforeIndex = beforePageId
+    ? project.pages.findIndex((entry) => entry.id === beforePageId)
+    : -1;
+  const insertIndex = Number.isFinite(rawIndex)
+    ? rawIndex
+    : beforeIndex >= 0
+      ? beforeIndex
+      : pageIndex >= 0
+        ? pageIndex + 1
+        : project.pages.length;
+  const clampedInsertIndex = Math.max(0, Math.min(project.pages.length, insertIndex));
+
+  project.pages.splice(clampedInsertIndex, 0, page);
+  project.updatedAt = now;
+  return page;
+}
+
+function restoreProjectPageSnapshot(project, pageSnapshot, options = {}) {
+  const snapshot = cloneJsonValue(pageSnapshot, null);
+
+  if (!snapshot || typeof snapshot !== "object") {
+    return null;
+  }
+
+  const pageId = normalizePageId(snapshot.id);
+
+  if (!pageId) {
+    return null;
+  }
+
+  const restoredPage = normalizeProjectPage(
+    {
+      ...snapshot,
+      id: pageId,
+      launchUrl: "",
+      files: null,
+      pageLock: null,
+    },
+    project.id,
+  );
+  const existingIndex = project.pages.findIndex((page) => page.id === pageId);
+  const rawIndex = Number(options.pageIndex);
+  const requestedIndex = Number.isFinite(rawIndex) ? rawIndex : project.pages.length;
+  const insertIndex = Math.max(0, Math.min(project.pages.length, requestedIndex));
+
+  if (existingIndex >= 0) {
+    project.pages[existingIndex] = restoredPage;
+  } else {
+    project.pages.splice(insertIndex, 0, restoredPage);
+  }
+
+  project.updatedAt = Date.now();
+  return restoredPage;
+}
+
 async function ensureProjectCodexContext(project) {
   if (!String(project.codexContextId || "").trim()) {
     project.codexContextId = createProjectCodexContext(project.id);
@@ -2921,14 +3033,11 @@ export async function handleProjectsRequest(req) {
     await recordAuditEvent({
       actorEmail: user.email,
       actorRole: user.role,
-      action: "project.create_edit_session",
+      action: "project.reorder_pages",
       resourceType: "project",
       resourceId: persistedProject.id,
       metadata: {
-        sessionId: session.id,
-        pageId,
-        branchName: session.branchName,
-        status: session.status,
+        order: finalOrder,
       },
     });
 
@@ -2936,6 +3045,328 @@ export async function handleProjectsRequest(req) {
       status: 200,
       payload: {
         ok: true,
+        project: await buildProjectPayload(persistedProject, await buildOwnerDirectory(), user, origin),
+      },
+    };
+  }
+
+  if (action === "duplicatePage") {
+    const projectId = normalizeProjectId(payload.project);
+    const pageId = normalizePageId(payload.page);
+
+    if (!projectId || !pageId) {
+      return {
+        status: 400,
+        payload: {
+          ok: false,
+          error: "Choose a valid project page.",
+        },
+      };
+    }
+
+    const project = await readDynamicProject(projectId);
+
+    if (!project) {
+      return {
+        status: 404,
+        payload: {
+          ok: false,
+          error: "Project not found.",
+        },
+      };
+    }
+
+    if (!(await userCanManageProjectPages(user, project))) {
+      return {
+        status: 403,
+        payload: {
+          ok: false,
+          error: "You do not have permission to duplicate pages in this project.",
+        },
+      };
+    }
+
+    const sourcePage = project.pages.find((entry) => entry.id === pageId);
+
+    if (!sourcePage) {
+      return {
+        status: 404,
+        payload: {
+          ok: false,
+          error: "Page not found.",
+        },
+      };
+    }
+
+    const page = duplicateProjectPage(project, sourcePage, {
+      insertIndex: payload.insertIndex,
+      beforePageId: payload.beforePageId,
+    });
+    const persistedProject = await persistProject(project, { syncWorkspace: true });
+    const persistedPage = persistedProject.pages.find((entry) => entry.id === page.id) || page;
+    await recordAuditEvent({
+      actorEmail: user.email,
+      actorRole: user.role,
+      action: "project.duplicate_page",
+      resourceType: "project",
+      resourceId: persistedProject.id,
+      metadata: {
+        sourcePageId: sourcePage.id,
+        pageId: persistedPage.id,
+      },
+    });
+
+    return {
+      status: 200,
+      payload: {
+        ok: true,
+        page: createPageResponse(persistedProject, persistedPage),
+        project: await buildProjectPayload(persistedProject, await buildOwnerDirectory(), user, origin),
+      },
+    };
+  }
+
+  if (action === "deletePage") {
+    const projectId = normalizeProjectId(payload.project);
+    const pageId = normalizePageId(payload.page);
+
+    if (!projectId || !pageId) {
+      return {
+        status: 400,
+        payload: {
+          ok: false,
+          error: "Choose a valid project page.",
+        },
+      };
+    }
+
+    const project = await readDynamicProject(projectId);
+
+    if (!project) {
+      return {
+        status: 404,
+        payload: {
+          ok: false,
+          error: "Project not found.",
+        },
+      };
+    }
+
+    if (!(await userCanManageProjectPages(user, project))) {
+      return {
+        status: 403,
+        payload: {
+          ok: false,
+          error: "You do not have permission to delete pages in this project.",
+        },
+      };
+    }
+
+    if (project.pages.length <= 1) {
+      return {
+        status: 400,
+        payload: {
+          ok: false,
+          error: "A project needs at least one page.",
+        },
+      };
+    }
+
+    const pageIndex = project.pages.findIndex((entry) => entry.id === pageId);
+
+    if (pageIndex < 0) {
+      return {
+        status: 404,
+        payload: {
+          ok: false,
+          error: "Page not found.",
+        },
+      };
+    }
+
+    const [deletedPage] = project.pages.splice(pageIndex, 1);
+    project.pageLocks = normalizePageLocks(project.pageLocks).filter((lock) => lock.pageId !== pageId);
+    project.prototypeLinks = normalizePrototypeLinks(project.prototypeLinks).filter((link) => link.pageId !== pageId);
+    project.updatedAt = Date.now();
+    const nextPage = project.pages[Math.min(pageIndex, project.pages.length - 1)] || project.pages[0] || null;
+    const persistedProject = await persistProject(project, { syncWorkspace: true });
+    const persistedNextPage = nextPage
+      ? persistedProject.pages.find((entry) => entry.id === nextPage.id) || nextPage
+      : null;
+    await recordAuditEvent({
+      actorEmail: user.email,
+      actorRole: user.role,
+      action: "project.delete_page",
+      resourceType: "project",
+      resourceId: persistedProject.id,
+      metadata: {
+        pageId: deletedPage.id,
+        nextPageId: persistedNextPage?.id || "",
+      },
+    });
+
+    return {
+      status: 200,
+      payload: {
+        ok: true,
+        deletedPageId: deletedPage.id,
+        nextPageId: persistedNextPage?.id || "",
+        page: persistedNextPage ? createPageResponse(persistedProject, persistedNextPage) : null,
+        project: await buildProjectPayload(persistedProject, await buildOwnerDirectory(), user, origin),
+      },
+    };
+  }
+
+  if (action === "restorePageSnapshot") {
+    const projectId = normalizeProjectId(payload.project);
+
+    if (!projectId) {
+      return {
+        status: 400,
+        payload: {
+          ok: false,
+          error: "Choose a valid project.",
+        },
+      };
+    }
+
+    const project = await readDynamicProject(projectId);
+
+    if (!project) {
+      return {
+        status: 404,
+        payload: {
+          ok: false,
+          error: "Project not found.",
+        },
+      };
+    }
+
+    if (!(await userCanManageProjectPages(user, project))) {
+      return {
+        status: 403,
+        payload: {
+          ok: false,
+          error: "You do not have permission to restore pages in this project.",
+        },
+      };
+    }
+
+    const page = restoreProjectPageSnapshot(project, payload.pageSnapshot, {
+      pageIndex: payload.pageIndex,
+    });
+
+    if (!page) {
+      return {
+        status: 400,
+        payload: {
+          ok: false,
+          error: "Choose a valid page snapshot.",
+        },
+      };
+    }
+
+    if (Array.isArray(payload.prototypeLinksSnapshot)) {
+      project.prototypeLinks = normalizePrototypeLinks(payload.prototypeLinksSnapshot);
+    }
+
+    if (Array.isArray(payload.pageLocksSnapshot)) {
+      project.pageLocks = normalizePageLocks(payload.pageLocksSnapshot);
+    }
+
+    const persistedProject = await persistProject(project, { syncWorkspace: true });
+    const persistedPage = persistedProject.pages.find((entry) => entry.id === page.id) || page;
+    await recordAuditEvent({
+      actorEmail: user.email,
+      actorRole: user.role,
+      action: "project.restore_page_snapshot",
+      resourceType: "project",
+      resourceId: persistedProject.id,
+      metadata: {
+        pageId: persistedPage.id,
+      },
+    });
+
+    return {
+      status: 200,
+      payload: {
+        ok: true,
+        page: createPageResponse(persistedProject, persistedPage),
+        project: await buildProjectPayload(persistedProject, await buildOwnerDirectory(), user, origin),
+      },
+    };
+  }
+
+  if (action === "clearVibeContent") {
+    const projectId = normalizeProjectId(payload.project);
+    const pageId = normalizePageId(payload.page);
+
+    if (!projectId || !pageId) {
+      return {
+        status: 400,
+        payload: {
+          ok: false,
+          error: "Choose a valid project page.",
+        },
+      };
+    }
+
+    const project = await readDynamicProject(projectId);
+
+    if (!project) {
+      return {
+        status: 404,
+        payload: {
+          ok: false,
+          error: "Project not found.",
+        },
+      };
+    }
+
+    if (!(await userCanManageProjectPages(user, project))) {
+      return {
+        status: 403,
+        payload: {
+          ok: false,
+          error: "You do not have permission to clear this page.",
+        },
+      };
+    }
+
+    const page = project.pages.find((entry) => entry.id === pageId);
+
+    if (!page) {
+      return {
+        status: 404,
+        payload: {
+          ok: false,
+          error: "Page not found.",
+        },
+      };
+    }
+
+    page.preview = null;
+    page.hasContent = false;
+    page.vibe = createDefaultVibeState();
+    project.updatedAt = Date.now();
+    const persistedProject = await persistProject(project, { syncWorkspace: true });
+    const persistedPage = persistedProject.pages.find((entry) => entry.id === page.id) || page;
+    await recordAuditEvent({
+      actorEmail: user.email,
+      actorRole: user.role,
+      action: "project.clear_vibe_content",
+      resourceType: "project",
+      resourceId: persistedProject.id,
+      metadata: {
+        pageId: persistedPage.id,
+      },
+    });
+
+    return {
+      status: 200,
+      payload: {
+        ok: true,
+        page: createPageResponse(persistedProject, persistedPage),
         project: await buildProjectPayload(persistedProject, await buildOwnerDirectory(), user, origin),
       },
     };
