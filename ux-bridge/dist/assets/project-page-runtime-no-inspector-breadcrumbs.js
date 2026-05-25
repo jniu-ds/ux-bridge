@@ -1544,10 +1544,6 @@ import{n as e,t}from"./chunk-B3K2TuZy.js";import{t as n}from"./es-CuEe9zjw.js";f
       `:`
         <div class="preview-inspector__sections preview-inspector__sections--empty">
           ${Qe}
-          <div class="preview-inspector__fields preview-inspector__fields--empty">
-            <p>Current depth: <strong>${Es(a)}</strong></p>
-            <p>${Oi(a).length} direct child layers available here.</p>
-          </div>
         </div>
       `;k.innerHTML=`
       <div class="preview-inspector__header">
