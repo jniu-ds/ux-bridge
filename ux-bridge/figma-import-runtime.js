@@ -291,8 +291,34 @@
     }
   }
 
+  function getImportButtonFromEventTarget(target) {
+    if (!(target instanceof Element)) {
+      return null;
+    }
+
+    const explicit = target.closest("[data-figma-import-open]");
+    if (explicit instanceof HTMLElement) {
+      return explicit;
+    }
+
+    const button = target.closest("button, [role='button'], a");
+    if (!(button instanceof HTMLElement)) {
+      return null;
+    }
+
+    if (!button.closest("[data-empty-mobile-shell]")) {
+      return null;
+    }
+
+    if (button.textContent.trim().toLowerCase() !== "import from figma") {
+      return null;
+    }
+
+    return button;
+  }
+
   function isImportButton(element) {
-    if (!(element instanceof HTMLButtonElement)) {
+    if (!(element instanceof HTMLElement)) {
       return false;
     }
 
@@ -316,6 +342,21 @@
       });
     });
   }
+
+  document.addEventListener(
+    "click",
+    (event) => {
+      const button = getImportButtonFromEventTarget(event.target);
+      if (!button) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      openModal();
+    },
+    true,
+  );
 
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && state.open && !state.loading) {

@@ -1761,7 +1761,7 @@ Error generating stack: `+e.message+`
                         <span class="empty-mobile-shell__choice-label">Claude</span>
                       </button>
                     </div>
-                    <button type="button" class="empty-mobile-shell__cta empty-mobile-shell__cta--secondary">
+                    <button type="button" class="empty-mobile-shell__cta empty-mobile-shell__cta--secondary" data-figma-import-open>
                       Import from Figma
                     </button>
                   </div>
