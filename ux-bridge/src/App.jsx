@@ -187,6 +187,7 @@ function DynamicProjectPage() {
       () => import("../viewport-scale.js"),
       () => import("../project-page-runtime.js"),
       () => import("../vibe-drawer.js"),
+      () => import("../figma-import-runtime.js"),
       () => import("../comments-panel.js"),
       () => import("../dev-mode-drawer.js"),
       () => import("../customizer.js"),

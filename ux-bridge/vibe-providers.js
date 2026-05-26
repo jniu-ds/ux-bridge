@@ -418,6 +418,58 @@ function buildCodexUserPrompt({
   ].join("\n\n");
 }
 
+function buildFigmaImportUserText({ prompt, projectName, pageName, figmaImport }) {
+  const metadata = {
+    fileKey: figmaImport?.fileKey,
+    nodeId: figmaImport?.nodeId,
+    name: figmaImport?.name,
+    type: figmaImport?.type,
+    width: figmaImport?.width,
+    height: figmaImport?.height,
+    nodeTree: figmaImport?.nodeTree,
+  };
+
+  return [
+    "Recreate this Figma node as a UX Bridge page-scoped mobile preview.",
+    "Aim for a 1:1 visual match at the source design size while making the layout responsive at all screen sizes.",
+    "Use the attached Figma screenshot as the visual source of truth and the Figma node metadata for structure, text, spacing, colors, and hierarchy.",
+    "Do not create app chrome, device frames, inspector UI, navigation rails, or browser UI.",
+    "If the Figma node is desktop-sized, translate it into a responsive .vibe-generated-page that preserves the design language and adapts gracefully down to mobile.",
+    [
+      `Project: ${projectName}`,
+      `Page: ${pageName}`,
+      `User import note: ${String(prompt || "").trim() || "Import this Figma selection into the current empty preview."}`,
+      `Figma node metadata JSON: ${JSON.stringify(metadata)}`,
+    ].join("\n"),
+    "Return JSON with keys: summary, html, css, js, assets.",
+    "Use js only for interactions that are visible in the Figma design or naturally implied by controls in the design.",
+  ].join("\n\n");
+}
+
+function buildStructuredCodexRequest({ userText, imageUrl = "" }) {
+  const trimmedImageUrl = String(imageUrl || "").trim();
+
+  if (!trimmedImageUrl) {
+    return userText;
+  }
+
+  return [
+    {
+      role: "user",
+      content: [
+        {
+          type: "input_text",
+          text: userText,
+        },
+        {
+          type: "input_image",
+          image_url: trimmedImageUrl,
+        },
+      ],
+    },
+  ];
+}
+
 function extractResponseText(payload = {}) {
   if (typeof payload.output_text === "string" && payload.output_text.trim()) {
     return payload.output_text;
@@ -525,6 +577,7 @@ async function generateCodexPageResult({
   includeProjectContext,
   includePageContext,
   providerAuth = {},
+  figmaImport = null,
 }) {
   const apiKey = String(providerAuth?.apiKey || "").trim();
 
@@ -534,13 +587,18 @@ async function generateCodexPageResult({
 
   const requestBody = {
     instructions: buildCodexSystemPrompt(),
-    input: buildCodexUserPrompt({
-      prompt,
-      projectName,
-      pageName,
-      includeProjectContext,
-      includePageContext,
-    }),
+    input: figmaImport
+      ? buildStructuredCodexRequest({
+          userText: buildFigmaImportUserText({ prompt, projectName, pageName, figmaImport }),
+          imageUrl: figmaImport.imageUrl,
+        })
+      : buildCodexUserPrompt({
+          prompt,
+          projectName,
+          pageName,
+          includeProjectContext,
+          includePageContext,
+        }),
     reasoning: {
       effort: "low",
     },
@@ -634,6 +692,24 @@ async function generateCodexPageResult({
   }
 
   throw new Error("Codex generation failed.");
+}
+
+export async function generateFigmaImportPageResult({
+  prompt,
+  projectName,
+  pageName,
+  providerAuth,
+  figmaImport,
+}) {
+  return generateCodexPageResult({
+    prompt,
+    projectName,
+    pageName,
+    includeProjectContext: true,
+    includePageContext: true,
+    providerAuth,
+    figmaImport,
+  });
 }
 
 export function listVibeProviders() {

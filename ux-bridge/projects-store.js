@@ -46,7 +46,13 @@ import {
   getProjectEditSessionReview,
   mergeProjectEditSessionWorkspace,
 } from "./project-session-worker.js";
-import { generateVibePageResult, listVibeProviders, validateGeneratedVibePayload } from "./vibe-providers.js";
+import { fetchFigmaImportContext } from "./figma-import.js";
+import {
+  generateFigmaImportPageResult,
+  generateVibePageResult,
+  listVibeProviders,
+  validateGeneratedVibePayload,
+} from "./vibe-providers.js";
 
 const PROJECTS_STORE_KEY = "__uxBridgeProjectsStore__";
 const PROJECTS_INDEX_KEY = "ux-bridge:projects:index";
@@ -2808,6 +2814,157 @@ export async function handleProjectsRequest(req) {
       payload: {
         ok: true,
         project: await buildProjectPayload(project, await buildOwnerDirectory(), user, origin),
+        vibeProviders: await listProjectVibeProviders(user),
+      },
+    };
+  }
+
+  if (action === "importFigmaContent") {
+    const projectId = normalizeProjectId(payload.project);
+    const pageId = normalizePageId(payload.page);
+    const figmaUrl = String(payload.figmaUrl || "").trim();
+    const prompt = String(payload.prompt || "").trim();
+
+    if (!projectId || !pageId) {
+      return {
+        status: 400,
+        payload: { ok: false, error: "Choose a valid project page." },
+      };
+    }
+
+    if (!figmaUrl) {
+      return {
+        status: 400,
+        payload: { ok: false, error: "Paste a Figma frame or layer URL." },
+      };
+    }
+
+    const project = await readDynamicProject(projectId);
+
+    if (!project) {
+      return {
+        status: 404,
+        payload: { ok: false, error: "Project not found." },
+      };
+    }
+
+    const access = await computeProjectAccess(user, project);
+
+    if (!access.hasAccess) {
+      return {
+        status: 403,
+        payload: { ok: false, error: "You do not have access to this project." },
+      };
+    }
+
+    const page = project.pages.find((entry) => entry.id === pageId);
+
+    if (!page) {
+      return {
+        status: 404,
+        payload: { ok: false, error: "Page not found." },
+      };
+    }
+
+    const generatedAt = Date.now();
+    let figmaImport;
+    let generated;
+
+    try {
+      figmaImport = await fetchFigmaImportContext(figmaUrl);
+      generated = await generateFigmaImportPageResult({
+        prompt,
+        projectName: project.name,
+        pageName: page.name,
+        providerAuth: {
+          apiKey: await readSharedCodexApiKey(user),
+        },
+        figmaImport,
+      });
+    } catch (error) {
+      return {
+        status: 400,
+        payload: {
+          ok: false,
+          error: error instanceof Error ? error.message : "Unable to import that Figma design.",
+        },
+      };
+    }
+
+    const nextDraft = {
+      providerId: "codex",
+      providerLabel: generated.providerLabel,
+      summary: generated.summary,
+      html: generated.html,
+      css: generated.css,
+      js: generated.js,
+      generatedAt,
+      assets: generated.assets,
+      credentialMode: generated.credentialMode,
+      source: {
+        type: "figma",
+        url: figmaImport.url,
+        fileKey: figmaImport.fileKey,
+        nodeId: figmaImport.nodeId,
+        name: figmaImport.name,
+      },
+    };
+    const currentVibe = normalizeVibeState(page.vibe);
+
+    page.vibe = {
+      ...currentVibe,
+      providerId: "codex",
+      prompt: prompt || `Import from Figma: ${figmaImport.name || figmaImport.nodeId}`,
+      includeProjectContext: true,
+      includePageContext: true,
+      status: "applied",
+      summary: generated.summary,
+      error: "",
+      generatedAt,
+      appliedAt: generatedAt,
+      credentialMode: generated.credentialMode,
+      availableVia: generated.availableVia,
+      lastDraft: nextDraft,
+      appliedDraft: nextDraft,
+      draftHistory: mergeVibeDraftHistory(currentVibe.draftHistory, currentVibe.lastDraft, nextDraft),
+    };
+    syncAppliedPreviewIntoPage(page, nextDraft, generatedAt);
+    appendCodexThreadMessages(project, page.id, [
+      {
+        pageId: page.id,
+        role: "user",
+        userId: user.email,
+        content: prompt || `Import from Figma: ${figmaImport.url}`,
+        createdAt: generatedAt,
+        metadata: {
+          source: "figma",
+          figmaNodeId: figmaImport.nodeId,
+          figmaFileKey: figmaImport.fileKey,
+        },
+      },
+      {
+        pageId: page.id,
+        role: "assistant",
+        content: generated.summary || "Imported a Figma design into the preview.",
+        createdAt: generatedAt + 1,
+        metadata: {
+          providerId: "codex",
+          providerLabel: generated.providerLabel,
+          source: "figma",
+          figmaNodeId: figmaImport.nodeId,
+          figmaFileKey: figmaImport.fileKey,
+          assets: generated.assets,
+        },
+      },
+    ]);
+    project.updatedAt = generatedAt;
+    const persistedProject = await persistProject(project, { syncWorkspace: true });
+
+    return {
+      status: 200,
+      payload: {
+        ok: true,
+        project: await buildProjectPayload(persistedProject, await buildOwnerDirectory(), user, origin),
         vibeProviders: await listProjectVibeProviders(user),
       },
     };
