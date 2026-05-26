@@ -92,6 +92,50 @@ const PROJECT_EDIT_SESSION_STATUSES = [
   EDIT_SESSION_STATUS_MERGED,
   EDIT_SESSION_STATUS_ARCHIVED,
 ];
+
+async function readSharedCodexApiKey(user) {
+  const userEmail = normalizeEmail(user?.email);
+  const userKey = userEmail ? await readUserIntegrationSecret(userEmail, "codex") : "";
+
+  if (String(userKey || "").trim()) {
+    return userKey;
+  }
+
+  const users = await listUserDirectory();
+  const adminEmails = users
+    .filter((entry) => entry?.role === ADMIN_ROLE)
+    .map((entry) => normalizeEmail(entry?.email))
+    .filter(Boolean);
+
+  for (const adminEmail of adminEmails) {
+    if (adminEmail === userEmail) {
+      continue;
+    }
+
+    const adminKey = await readUserIntegrationSecret(adminEmail, "codex");
+
+    if (String(adminKey || "").trim()) {
+      return adminKey;
+    }
+  }
+
+  return "";
+}
+
+async function listProjectVibeProviders(user) {
+  const codexConfigured = Boolean(String(await readSharedCodexApiKey(user)).trim());
+
+  return listVibeProviders().map((provider) =>
+    provider.id === "codex"
+      ? {
+          ...provider,
+          isConfigured: codexConfigured,
+          credentialMode: codexConfigured ? "admin-managed" : provider.credentialMode,
+          accountLabel: codexConfigured ? "Admin managed" : provider.accountLabel,
+        }
+      : provider,
+  );
+}
 const PAGE_LOCK_MODE_SOFT = "soft";
 const DEFAULT_VIBE_PROVIDER_ID = "codex";
 const LEGACY_BRAND_AFFILIATE_PROJECT = {
@@ -1839,7 +1883,7 @@ export async function handleProjectsRequest(req) {
         payload: {
           ok: true,
           project,
-          vibeProviders: listVibeProviders(),
+          vibeProviders: await listProjectVibeProviders(user),
           currentUser: user,
           canCreateProjects: await canCreateProjects(user),
           canDuplicateProjects: await canDuplicateProjects(user),
@@ -1980,7 +2024,7 @@ export async function handleProjectsRequest(req) {
       payload: {
         ok: true,
         project: await buildProjectPayload(persistedProject, await buildOwnerDirectory(), user, origin),
-        vibeProviders: listVibeProviders(),
+        vibeProviders: await listProjectVibeProviders(user),
         launchUrl: buildDynamicPageLaunchUrl(persistedProject.id, firstPage.id),
         codexContext: createProjectContextPayload(persistedProject),
       },
@@ -2032,7 +2076,7 @@ export async function handleProjectsRequest(req) {
         ok: true,
         page: createPageResponse(persistedProject, page),
         project: await buildProjectPayload(persistedProject, await buildOwnerDirectory(), user, origin),
-        vibeProviders: listVibeProviders(),
+        vibeProviders: await listProjectVibeProviders(user),
       },
     };
   }
@@ -2139,7 +2183,7 @@ export async function handleProjectsRequest(req) {
       payload: {
         ok: true,
         project: await buildProjectPayload(persistedProject, await buildOwnerDirectory(), user, origin),
-        vibeProviders: listVibeProviders(),
+        vibeProviders: await listProjectVibeProviders(user),
       },
     };
   }
@@ -2675,7 +2719,7 @@ export async function handleProjectsRequest(req) {
     const providerAuth =
       providerId === "codex"
         ? {
-            apiKey: await readUserIntegrationSecret(user.email, "codex"),
+            apiKey: await readSharedCodexApiKey(user),
           }
         : {};
     let generated;
@@ -2764,7 +2808,7 @@ export async function handleProjectsRequest(req) {
       payload: {
         ok: true,
         project: await buildProjectPayload(project, await buildOwnerDirectory(), user, origin),
-        vibeProviders: listVibeProviders(),
+        vibeProviders: await listProjectVibeProviders(user),
       },
     };
   }
@@ -2893,7 +2937,7 @@ export async function handleProjectsRequest(req) {
       payload: {
         ok: true,
         project: await buildProjectPayload(project, await buildOwnerDirectory(), user, origin),
-        vibeProviders: listVibeProviders(),
+        vibeProviders: await listProjectVibeProviders(user),
       },
     };
   }
@@ -2968,7 +3012,7 @@ export async function handleProjectsRequest(req) {
       payload: {
         ok: true,
         project: await buildProjectPayload(persistedProject, await buildOwnerDirectory(), user, origin),
-        vibeProviders: listVibeProviders(),
+        vibeProviders: await listProjectVibeProviders(user),
       },
     };
   }
@@ -3042,7 +3086,7 @@ export async function handleProjectsRequest(req) {
       payload: {
         ok: true,
         project: await buildProjectPayload(project, await buildOwnerDirectory(), user, origin),
-        vibeProviders: listVibeProviders(),
+        vibeProviders: await listProjectVibeProviders(user),
       },
     };
   }

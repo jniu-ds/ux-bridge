@@ -107,6 +107,10 @@
       return Boolean(state.localBridge.available);
     }
 
+    if (provider?.isConfigured) {
+      return true;
+    }
+
     const currentUser = getCurrentUser();
     return Boolean(currentUser?.integrations?.[providerId]?.connected);
   }

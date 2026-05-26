@@ -529,7 +529,7 @@ async function generateCodexPageResult({
   const apiKey = String(providerAuth?.apiKey || "").trim();
 
   if (!apiKey) {
-    throw new Error("Connect Codex in your Profile before generating.");
+    throw new Error("Connect Codex in an Admin Profile before generating.");
   }
 
   const requestBody = {
