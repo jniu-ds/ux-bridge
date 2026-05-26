@@ -2,9 +2,10 @@ const FIGMA_API_BASE_URL = "https://api.figma.com/v1";
 const MAX_FIGMA_TREE_NODES = 140;
 const MAX_FIGMA_TREE_DEPTH = 8;
 
-function readFigmaAccessToken() {
+function readFigmaAccessToken(explicitToken = "") {
   return String(
-    process.env.UX_BRIDGE_FIGMA_ACCESS_TOKEN ||
+    explicitToken ||
+      process.env.UX_BRIDGE_FIGMA_ACCESS_TOKEN ||
       process.env.FIGMA_ACCESS_TOKEN ||
       process.env.FIGMA_TOKEN ||
       "",
@@ -174,15 +175,15 @@ export function parseFigmaNodeUrl(value) {
   return { fileKey, nodeId, url: url.toString() };
 }
 
-export async function fetchFigmaImportContext(figmaUrl) {
-  const token = readFigmaAccessToken();
+export async function fetchFigmaImportContext(figmaUrl, options = {}) {
+  const token = readFigmaAccessToken(options.accessToken);
 
   if (!token) {
-    throw new Error("Add FIGMA_ACCESS_TOKEN to Vercel Environment Variables before importing from Figma.");
+    throw new Error("Connect your Figma account before importing from Figma.");
   }
 
   const target = parseFigmaNodeUrl(figmaUrl);
-  const headers = { "X-Figma-Token": token };
+  const headers = options.accessToken ? { Authorization: `Bearer ${token}` } : { "X-Figma-Token": token };
   const nodeResponse = await fetch(
     `${FIGMA_API_BASE_URL}/files/${encodeURIComponent(target.fileKey)}/nodes?ids=${encodeURIComponent(target.nodeId)}`,
     { headers },

@@ -53,6 +53,7 @@ import {
   listVibeProviders,
   validateGeneratedVibePayload,
 } from "./vibe-providers.js";
+import { readFigmaUserAccessToken } from "./figma-oauth-store.js";
 
 const PROJECTS_STORE_KEY = "__uxBridgeProjectsStore__";
 const PROJECTS_INDEX_KEY = "ux-bridge:projects:index";
@@ -2871,7 +2872,20 @@ export async function handleProjectsRequest(req) {
     let generated;
 
     try {
-      figmaImport = await fetchFigmaImportContext(figmaUrl);
+      const figmaAccessToken = await readFigmaUserAccessToken(user.email);
+
+      if (!figmaAccessToken) {
+        return {
+          status: 401,
+          payload: {
+            ok: false,
+            code: "FIGMA_NOT_CONNECTED",
+            error: "Connect your Figma account before importing from Figma.",
+          },
+        };
+      }
+
+      figmaImport = await fetchFigmaImportContext(figmaUrl, { accessToken: figmaAccessToken });
       generated = await generateFigmaImportPageResult({
         prompt,
         projectName: project.name,

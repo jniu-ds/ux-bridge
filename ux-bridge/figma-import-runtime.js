@@ -6,11 +6,16 @@
   window.__uxBridgeFigmaImportRuntime = true;
 
   const PROJECTS_API = "/api/projects";
+  const FIGMA_API = "/api/figma";
   const MODAL_ID = "ux-figma-import-modal";
   const STYLE_ID = "ux-figma-import-styles";
   const state = {
     open: false,
     loading: false,
+    checkingConnection: false,
+    configured: false,
+    connected: false,
+    connectUrl: "",
     error: "",
     url: "",
   };
@@ -139,6 +144,21 @@
         background: #252525;
         color: #ffffff;
       }
+
+      .figma-import-dialog__connect {
+        display: grid;
+        gap: 12px;
+        padding: 16px;
+        border: 1px solid rgba(124, 58, 237, 0.18);
+        border-radius: 18px;
+        background: rgba(250, 245, 255, 0.72);
+      }
+
+      .figma-import-dialog__connect button {
+        width: fit-content;
+        background: #7c3aed;
+        color: #ffffff;
+      }
     `;
     document.head.append(style);
   }
@@ -161,8 +181,29 @@
   function openModal() {
     state.open = true;
     state.loading = false;
+    state.checkingConnection = true;
     state.error = "";
     renderModal();
+    void checkFigmaConnection();
+  }
+
+  async function checkFigmaConnection() {
+    try {
+      const returnTo = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+      const response = await fetch(`${FIGMA_API}?action=status&returnTo=${encodeURIComponent(returnTo)}`, {
+        credentials: "include",
+      });
+      const payload = await response.json().catch(() => ({}));
+      state.configured = Boolean(payload?.configured);
+      state.connected = Boolean(payload?.connected);
+      state.connectUrl = String(payload?.connectUrl || `/api/figma?action=oauth-start&returnTo=${encodeURIComponent(returnTo)}`);
+      state.error = response.ok ? state.error : payload?.error || "Sign in before connecting Figma.";
+    } catch {
+      state.error = "Unable to check your Figma connection.";
+    } finally {
+      state.checkingConnection = false;
+      renderModal();
+    }
   }
 
   function renderModal() {
@@ -182,6 +223,20 @@
       document.body.append(modal);
     }
 
+    const canImport = state.connected && !state.checkingConnection;
+    const connectionContent = state.checkingConnection
+      ? `<p>Checking your Figma connection...</p>`
+      : state.connected
+        ? ""
+        : `<div class="figma-import-dialog__connect">
+            <p>${state.configured ? "Connect your Figma account so UX Bridge can read the frame you choose." : "Figma OAuth is not configured for this UX Bridge environment yet."}</p>
+            ${
+              state.configured
+                ? `<button type="button" data-figma-import-connect>Connect Figma</button>`
+                : ""
+            }
+          </div>`;
+
     modal.innerHTML = `
       <form class="figma-import-dialog" data-figma-import-form>
         <div class="figma-import-dialog__body">
@@ -190,14 +245,15 @@
             <h2>Import from Figma</h2>
           </div>
           <p>Paste a Figma frame or layer URL. UX Bridge will recreate it in this preview with Codex.</p>
+          ${connectionContent}
           <label>
             Figma URL
-            <input type="url" data-figma-import-url placeholder="https://www.figma.com/design/..." value="${escapeAttribute(state.url)}" ${state.loading ? "disabled" : ""} />
+            <input type="url" data-figma-import-url placeholder="https://www.figma.com/design/..." value="${escapeAttribute(state.url)}" ${state.loading || !canImport ? "disabled" : ""} />
           </label>
           ${state.error ? `<p class="figma-import-dialog__error">${escapeHtml(state.error)}</p>` : ""}
           <div class="figma-import-dialog__actions">
             <button type="button" class="figma-import-dialog__cancel" data-figma-import-cancel ${state.loading ? "disabled" : ""}>Cancel</button>
-            <button type="submit" class="figma-import-dialog__submit" ${state.loading ? "disabled" : ""}>
+            <button type="submit" class="figma-import-dialog__submit" ${state.loading || !canImport ? "disabled" : ""}>
               ${state.loading ? "Importing..." : "Import"}
             </button>
           </div>
@@ -212,6 +268,9 @@
     };
 
     modal.querySelector("[data-figma-import-cancel]")?.addEventListener("click", closeModal);
+    modal.querySelector("[data-figma-import-connect]")?.addEventListener("click", () => {
+      window.location.href = state.connectUrl || "/api/figma?action=oauth-start";
+    });
     modal.querySelector("[data-figma-import-url]")?.addEventListener("input", (event) => {
       state.url = event.currentTarget.value;
     });
@@ -221,7 +280,9 @@
     });
 
     window.requestAnimationFrame(() => {
-      modal.querySelector("[data-figma-import-url]")?.focus();
+      if (canImport) {
+        modal.querySelector("[data-figma-import-url]")?.focus();
+      }
     });
   }
 
@@ -275,6 +336,10 @@
       const payload = await response.json().catch(() => ({}));
 
       if (!response.ok || !payload?.ok || !payload?.project) {
+        if (payload?.code === "FIGMA_NOT_CONNECTED") {
+          state.connected = false;
+          void checkFigmaConnection();
+        }
         throw new Error(payload?.error || "Unable to import that Figma design.");
       }
 

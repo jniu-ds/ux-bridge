@@ -9,6 +9,7 @@ import { getStorageHealthSnapshot } from "./db/config.js";
 import { captureOperationalEvent } from "./db/observability.js";
 import { checkPostgresConnection } from "./db/postgres.js";
 import { checkRedisConnection } from "./db/redis.js";
+import { handleFigmaRequest, sendJson as sendFigmaJson } from "./figma-oauth-store.js";
 import { processPresenceActionAsync, readJsonBody, sendJson } from "./presence-store.js";
 import { handleProfileRequest, sendJson as sendProfileJson } from "./profile-store.js";
 import { handleProjectNavRequest, sendJson as sendProjectNavJson } from "./project-nav-store.js";
@@ -88,6 +89,19 @@ createServer(async (req, res) => {
     if (requestUrl.pathname === "/api/profile") {
       const result = await handleProfileRequest(req);
       sendProfileJson(res, result.status, result.payload, result.headers);
+      return;
+    }
+
+    if (requestUrl.pathname === "/api/figma" || requestUrl.pathname.startsWith("/api/figma/")) {
+      const result = await handleFigmaRequest(req);
+
+      if (result.headers?.Location) {
+        res.writeHead(result.status, result.headers);
+        res.end();
+        return;
+      }
+
+      sendFigmaJson(res, result.status, result.payload, result.headers);
       return;
     }
 
