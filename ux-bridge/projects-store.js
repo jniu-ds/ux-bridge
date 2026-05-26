@@ -397,6 +397,54 @@ function normalizeEditSessions(value) {
     .filter((entry) => entry.id && entry.projectId && entry.userId);
 }
 
+function normalizeCodexThreadMessage(entry) {
+  if (!entry || typeof entry !== "object") {
+    return null;
+  }
+
+  const content = String(entry.content || "").trim();
+  const role = String(entry.role || "user").trim().toLowerCase();
+
+  if (!content || !["assistant", "system", "user"].includes(role)) {
+    return null;
+  }
+
+  return {
+    id: String(entry.id || crypto.randomUUID()).trim(),
+    pageId: normalizePageId(entry.pageId),
+    role,
+    userId: normalizeEmail(entry.userId),
+    content,
+    createdAt: Number(entry.createdAt) || Date.now(),
+    metadata: entry.metadata && typeof entry.metadata === "object" ? entry.metadata : {},
+  };
+}
+
+function normalizeCodexThread(thread) {
+  const input = thread && typeof thread === "object" ? thread : {};
+
+  return {
+    activePageId: normalizePageId(input.activePageId),
+    messages: Array.isArray(input.messages)
+      ? input.messages.map((entry) => normalizeCodexThreadMessage(entry)).filter(Boolean).slice(-120)
+      : [],
+  };
+}
+
+function appendCodexThreadMessages(project, pageId, messages = []) {
+  if (!project || typeof project !== "object") {
+    return;
+  }
+
+  const currentThread = normalizeCodexThread(project.codexThread);
+  const normalizedMessages = messages.map((entry) => normalizeCodexThreadMessage(entry)).filter(Boolean);
+
+  project.codexThread = {
+    activePageId: normalizePageId(pageId || currentThread.activePageId),
+    messages: [...currentThread.messages, ...normalizedMessages].slice(-120),
+  };
+}
+
 function normalizePageLocks(value) {
   const input = Array.isArray(value) ? value : [];
 
@@ -456,6 +504,7 @@ function normalizeProjectRecord(project) {
     projectMembers,
     prototypeLinks: normalizePrototypeLinks(project.prototypeLinks),
     editSessions: normalizeEditSessions(project.editSessions),
+    codexThread: normalizeCodexThread(project.codexThread),
     pageLocks,
     viewerState: {
       ...(project.viewerState && typeof project.viewerState === "object" ? project.viewerState : {}),
@@ -1172,6 +1221,7 @@ async function buildProjectPayload(project, ownerDirectory = new Map(), user = n
     availableUsers,
     prototypeLinks: normalizePrototypeLinks(project.prototypeLinks),
     editSessions: normalizeEditSessions(project.editSessions),
+    codexThread: normalizeCodexThread(project.codexThread),
     pageLocks: normalizePageLocks(project.pageLocks),
     viewerState: {
       viewportPreset: normalizePreviewViewportPreset(project.viewerState?.viewportPreset),
@@ -2521,6 +2571,57 @@ export async function handleProjectsRequest(req) {
     };
   }
 
+  if (action === "setCodexActivePage") {
+    const projectId = normalizeProjectId(payload.project);
+    const pageId = normalizePageId(payload.page);
+
+    if (!projectId || !pageId) {
+      return {
+        status: 400,
+        payload: { ok: false, error: "Choose a valid project page." },
+      };
+    }
+
+    const project = await readDynamicProject(projectId);
+
+    if (!project) {
+      return {
+        status: 404,
+        payload: { ok: false, error: "Project not found." },
+      };
+    }
+
+    const access = await computeProjectAccess(user, project);
+
+    if (!access.hasAccess) {
+      return {
+        status: 403,
+        payload: { ok: false, error: "You do not have access to this project." },
+      };
+    }
+
+    if (!project.pages.some((entry) => entry.id === pageId)) {
+      return {
+        status: 404,
+        payload: { ok: false, error: "Page not found." },
+      };
+    }
+
+    project.codexThread = {
+      ...normalizeCodexThread(project.codexThread),
+      activePageId: pageId,
+    };
+    await writeDynamicProject(project);
+
+    return {
+      status: 200,
+      payload: {
+        ok: true,
+        project: await buildProjectPayload(project, await buildOwnerDirectory(), user, origin),
+      },
+    };
+  }
+
   if (action === "generateVibeContent") {
     const projectId = normalizeProjectId(payload.project);
     const pageId = normalizePageId(payload.page);
@@ -2635,6 +2736,26 @@ export async function handleProjectsRequest(req) {
       appliedDraft: normalizeVibeDraft(currentVibe.appliedDraft),
       draftHistory: mergeVibeDraftHistory(currentVibe.draftHistory, currentVibe.lastDraft, nextDraft),
     };
+    appendCodexThreadMessages(project, page.id, [
+      {
+        pageId: page.id,
+        role: "user",
+        userId: user.email,
+        content: prompt,
+        createdAt: generatedAt,
+      },
+      {
+        pageId: page.id,
+        role: "assistant",
+        content: generated.summary || "Generated a new preview draft.",
+        createdAt: generatedAt + 1,
+        metadata: {
+          providerId,
+          providerLabel: generated.providerLabel,
+          assets: generated.assets,
+        },
+      },
+    ]);
     project.updatedAt = generatedAt;
     await writeDynamicProject(project);
 
@@ -2744,6 +2865,26 @@ export async function handleProjectsRequest(req) {
       appliedDraft: normalizeVibeDraft(currentVibe.appliedDraft),
       draftHistory: mergeVibeDraftHistory(currentVibe.draftHistory, currentVibe.lastDraft, nextDraft),
     };
+    appendCodexThreadMessages(project, page.id, [
+      {
+        pageId: page.id,
+        role: "user",
+        userId: user.email,
+        content: prompt,
+        createdAt: generatedAt,
+      },
+      {
+        pageId: page.id,
+        role: "assistant",
+        content: generated.summary || "Generated a new preview draft.",
+        createdAt: generatedAt + 1,
+        metadata: {
+          providerId: generated.providerId,
+          providerLabel: generated.providerLabel,
+          assets: generated.assets,
+        },
+      },
+    ]);
     project.updatedAt = generatedAt;
     await writeDynamicProject(project);
 
