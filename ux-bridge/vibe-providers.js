@@ -615,70 +615,21 @@ function validateGeneratedJs(js) {
   return trimmed;
 }
 
-async function generateCodexPageResult({
-  prompt,
-  projectName,
-  pageName,
-  includeProjectContext,
-  includePageContext,
-  providerAuth = {},
-  figmaImport = null,
-}) {
-  const apiKey = String(providerAuth?.apiKey || "").trim();
-
-  if (!apiKey) {
-    throw new Error("Connect Codex in an Admin Profile before generating.");
-  }
-
-  const requestBody = {
-    instructions: figmaImport ? buildFigmaImportSystemPrompt() : buildCodexSystemPrompt(),
-    input: figmaImport
-      ? buildStructuredCodexRequest({
-          userText: buildFigmaImportUserText({ prompt, projectName, pageName, figmaImport }),
-          imageUrl: figmaImport.imageUrl,
-        })
-      : buildCodexUserPrompt({
-          prompt,
-          projectName,
-          pageName,
-          includeProjectContext,
-          includePageContext,
-        }),
-    reasoning: {
-      effort: "low",
-    },
-    text: {
-      format: {
-        type: "json_schema",
-        name: "ux_bridge_vibe_page_result",
-        strict: true,
-        schema: {
-          type: "object",
-          additionalProperties: false,
-          required: ["summary", "html", "css", "js", "assets"],
-          properties: {
-            summary: { type: "string" },
-            html: { type: "string" },
-            css: { type: "string" },
-            js: { type: "string" },
-            assets: {
-              type: "array",
-              items: {
-                type: "object",
-                additionalProperties: false,
-                required: ["name", "kind"],
-                properties: {
-                  name: { type: "string" },
-                  kind: { type: "string" },
-                },
-              },
-            },
-          },
-        },
-      },
-    },
+function buildCodexPageResultFromParsed(parsed = {}, summaryFallback = "Codex generated a page-scoped UI concept.") {
+  return {
+    providerId: "codex",
+    providerLabel: "Codex",
+    credentialMode: "user-session",
+    availableVia: "provider-adapter",
+    summary: String(parsed.summary || "").trim() || summaryFallback,
+    html: validateGeneratedHtml(parsed.html),
+    css: validateGeneratedCss(parsed.css),
+    js: validateGeneratedJs(parsed.js),
+    assets: Array.isArray(parsed.assets) ? parsed.assets : [],
   };
+}
 
+async function requestCodexStructuredPageResult({ apiKey, requestBody }) {
   let lastError = "";
 
   for (const model of CODEX_MODEL_CANDIDATES) {
@@ -709,26 +660,11 @@ async function generateCodexPageResult({
       continue;
     }
 
-    let parsed;
-
     try {
-      parsed = JSON.parse(responseText);
+      return JSON.parse(responseText);
     } catch {
       lastError = `${model}: malformed structured output`;
-      continue;
     }
-
-    return {
-      providerId: "codex",
-      providerLabel: "Codex",
-      credentialMode: "user-session",
-      availableVia: "provider-adapter",
-      summary: String(parsed.summary || "").trim() || "Codex generated a page-scoped UI concept.",
-      html: validateGeneratedHtml(parsed.html),
-      css: validateGeneratedCss(parsed.css),
-      js: validateGeneratedJs(parsed.js),
-      assets: Array.isArray(parsed.assets) ? parsed.assets : [],
-    };
   }
 
   if (lastError) {
@@ -737,6 +673,184 @@ async function generateCodexPageResult({
   }
 
   throw new Error("Codex generation failed.");
+}
+
+function shouldRunFigmaFastQa(figmaImport = null) {
+  if (!figmaImport?.imageUrl) {
+    return false;
+  }
+
+  return !/^(?:0|false|off)$/i.test(String(process.env.UX_BRIDGE_FIGMA_FAST_QA || "").trim());
+}
+
+function compactGeneratedPreviewForQa(result = {}) {
+  const html = String(result.html || "");
+  const css = String(result.css || "");
+  const js = String(result.js || "");
+
+  return {
+    summary: String(result.summary || "").slice(0, 2000),
+    html: html.slice(0, 70000),
+    css: css.slice(0, 70000),
+    js: js.slice(0, 20000),
+    htmlTruncated: html.length > 70000,
+    cssTruncated: css.length > 70000,
+    jsTruncated: js.length > 20000,
+    assets: Array.isArray(result.assets) ? result.assets.slice(0, 60) : [],
+  };
+}
+
+function buildFigmaFastQaUserText({ projectName, pageName, figmaImport, firstPass }) {
+  const qaPayload = compactGeneratedPreviewForQa(firstPass);
+  const metadata = {
+    name: figmaImport?.name,
+    type: figmaImport?.type,
+    nativeSize: {
+      width: figmaImport?.width,
+      height: figmaImport?.height,
+    },
+    assets: Array.isArray(figmaImport?.assets) ? figmaImport.assets : [],
+  };
+
+  return [
+    "This is a hidden Fast QA correction pass for a Figma import in UX Bridge.",
+    "Compare the generated preview code against the attached Figma screenshot. The screenshot is the visual truth.",
+    "Return a corrected full page result only if it improves visual fidelity. Keep the same JSON contract.",
+    "Focus on practical pixel-match issues: spacing, padding, margins, alignment, text wrapping, duplicated layers, asset sizing, image crop, icon placement, radii, shadows, and responsive behavior.",
+    "Do not add app chrome, device frames, inspector UI, browser UI, page navigation, or global body/html/:root styles.",
+    "Keep the result responsive. Match the Figma node at its native width, then adapt fluidly wider and narrower without changing the visual intent.",
+    "Do not remove real image or SVG asset URLs unless they are clearly duplicated or wrong.",
+    "If a generated code field is marked truncated, preserve the existing structure and make only high-confidence corrections.",
+    [
+      `Project: ${projectName}`,
+      `Page: ${pageName}`,
+      `Figma import metadata JSON: ${JSON.stringify(metadata)}`,
+      `Generated preview JSON: ${JSON.stringify(qaPayload)}`,
+    ].join("\n"),
+    "Return JSON with keys: summary, html, css, js, assets.",
+  ].join("\n\n");
+}
+
+async function runFigmaFastQaPass({
+  apiKey,
+  projectName,
+  pageName,
+  figmaImport,
+  firstPass,
+  responseFormat,
+}) {
+  if (!shouldRunFigmaFastQa(figmaImport)) {
+    return firstPass;
+  }
+
+  try {
+    const parsed = await requestCodexStructuredPageResult({
+      apiKey,
+      requestBody: {
+        instructions: buildFigmaImportSystemPrompt(),
+        input: buildStructuredCodexRequest({
+          userText: buildFigmaFastQaUserText({ projectName, pageName, figmaImport, firstPass }),
+          imageUrl: figmaImport.imageUrl,
+        }),
+        reasoning: {
+          effort: "low",
+        },
+        text: responseFormat,
+      },
+    });
+
+    const qaResult = buildCodexPageResultFromParsed(parsed, firstPass.summary);
+
+    return {
+      ...qaResult,
+      summary: qaResult.summary || firstPass.summary,
+    };
+  } catch (error) {
+    console.warn("[ux-bridge] Figma Fast QA pass skipped", {
+      message: error instanceof Error ? error.message : String(error),
+    });
+
+    return firstPass;
+  }
+}
+
+async function generateCodexPageResult({
+  prompt,
+  projectName,
+  pageName,
+  includeProjectContext,
+  includePageContext,
+  providerAuth = {},
+  figmaImport = null,
+}) {
+  const apiKey = String(providerAuth?.apiKey || "").trim();
+
+  if (!apiKey) {
+    throw new Error("Connect Codex in an Admin Profile before generating.");
+  }
+
+  const responseFormat = {
+    format: {
+      type: "json_schema",
+      name: "ux_bridge_vibe_page_result",
+      strict: true,
+      schema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["summary", "html", "css", "js", "assets"],
+        properties: {
+          summary: { type: "string" },
+          html: { type: "string" },
+          css: { type: "string" },
+          js: { type: "string" },
+          assets: {
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              required: ["name", "kind"],
+              properties: {
+                name: { type: "string" },
+                kind: { type: "string" },
+              },
+            },
+          },
+        },
+      },
+    },
+  };
+
+  const requestBody = {
+    instructions: figmaImport ? buildFigmaImportSystemPrompt() : buildCodexSystemPrompt(),
+    input: figmaImport
+      ? buildStructuredCodexRequest({
+          userText: buildFigmaImportUserText({ prompt, projectName, pageName, figmaImport }),
+          imageUrl: figmaImport.imageUrl,
+        })
+      : buildCodexUserPrompt({
+          prompt,
+          projectName,
+          pageName,
+          includeProjectContext,
+          includePageContext,
+        }),
+    reasoning: {
+      effort: "low",
+    },
+    text: responseFormat,
+  };
+
+  const parsed = await requestCodexStructuredPageResult({ apiKey, requestBody });
+  const firstPass = buildCodexPageResultFromParsed(parsed);
+
+  return runFigmaFastQaPass({
+    apiKey,
+    projectName,
+    pageName,
+    figmaImport,
+    firstPass,
+    responseFormat,
+  });
 }
 
 export async function generateFigmaImportPageResult({
