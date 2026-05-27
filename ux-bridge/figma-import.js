@@ -1,6 +1,7 @@
 const FIGMA_API_BASE_URL = "https://api.figma.com/v1";
-const MAX_FIGMA_TREE_NODES = 140;
-const MAX_FIGMA_TREE_DEPTH = 8;
+const MAX_FIGMA_TREE_NODES = 220;
+const MAX_FIGMA_TREE_DEPTH = 10;
+const MAX_FIGMA_ASSETS = 40;
 
 function readFigmaAccessToken(explicitToken = "") {
   return String(
@@ -12,28 +13,128 @@ function readFigmaAccessToken(explicitToken = "") {
   ).trim();
 }
 
+function roundNumber(value, precision = 100) {
+  return typeof value === "number" && Number.isFinite(value) ? Math.round(value * precision) / precision : undefined;
+}
+
+function compactColor(color = {}) {
+  if (!color || typeof color !== "object") {
+    return undefined;
+  }
+
+  return {
+    r: roundNumber(color.r, 1000),
+    g: roundNumber(color.g, 1000),
+    b: roundNumber(color.b, 1000),
+    a: roundNumber(color.a, 1000),
+  };
+}
+
+function compactVector(vector = {}) {
+  if (!vector || typeof vector !== "object") {
+    return undefined;
+  }
+
+  const result = {};
+  ["x", "y", "width", "height"].forEach((key) => {
+    if (typeof vector[key] === "number") {
+      result[key] = roundNumber(vector[key]);
+    }
+  });
+
+  return Object.keys(result).length ? result : undefined;
+}
+
+function compactBox(box = {}, rootBox = null) {
+  if (!box || typeof box !== "object") {
+    return undefined;
+  }
+
+  const result = compactVector(box) || {};
+
+  if (rootBox && typeof box.x === "number" && typeof rootBox.x === "number") {
+    result.relativeX = roundNumber(box.x - rootBox.x);
+  }
+
+  if (rootBox && typeof box.y === "number" && typeof rootBox.y === "number") {
+    result.relativeY = roundNumber(box.y - rootBox.y);
+  }
+
+  return Object.keys(result).length ? result : undefined;
+}
+
+function compactConstraint(constraints = {}) {
+  if (!constraints || typeof constraints !== "object") {
+    return undefined;
+  }
+
+  const result = {};
+  ["horizontal", "vertical"].forEach((key) => {
+    if (constraints[key]) {
+      result[key] = constraints[key];
+    }
+  });
+
+  return Object.keys(result).length ? result : undefined;
+}
+
+function compactTransform(transform) {
+  if (!Array.isArray(transform)) {
+    return undefined;
+  }
+
+  return transform
+    .slice(0, 2)
+    .map((row) => (Array.isArray(row) ? row.slice(0, 3).map((value) => roundNumber(value, 10000)) : row));
+}
+
 function compactPaint(paint = {}) {
   if (!paint || typeof paint !== "object" || paint.visible === false) {
     return null;
   }
 
+  const base = {
+    type: paint.type,
+    opacity: typeof paint.opacity === "number" ? roundNumber(paint.opacity, 1000) : undefined,
+    blendMode: paint.blendMode,
+  };
+
   if (paint.type === "SOLID") {
-    const color = paint.color || {};
     return {
-      type: "SOLID",
-      color: {
-        r: color.r,
-        g: color.g,
-        b: color.b,
-      },
-      opacity: typeof paint.opacity === "number" ? paint.opacity : 1,
+      ...base,
+      color: compactColor(paint.color),
+      opacity: typeof paint.opacity === "number" ? roundNumber(paint.opacity, 1000) : 1,
     };
   }
 
-  return {
-    type: paint.type,
-    opacity: typeof paint.opacity === "number" ? paint.opacity : undefined,
-  };
+  if (paint.type === "IMAGE") {
+    return {
+      ...base,
+      imageRef: paint.imageRef,
+      scaleMode: paint.scaleMode,
+      imageTransform: compactTransform(paint.imageTransform),
+      scalingFactor: roundNumber(paint.scalingFactor),
+      rotation: roundNumber(paint.rotation),
+      filters: paint.filters,
+    };
+  }
+
+  if (String(paint.type || "").startsWith("GRADIENT")) {
+    return {
+      ...base,
+      gradientHandlePositions: Array.isArray(paint.gradientHandlePositions)
+        ? paint.gradientHandlePositions.map(compactVector)
+        : undefined,
+      gradientStops: Array.isArray(paint.gradientStops)
+        ? paint.gradientStops.slice(0, 8).map((stop) => ({
+            position: roundNumber(stop.position, 1000),
+            color: compactColor(stop.color),
+          }))
+        : undefined,
+    };
+  }
+
+  return base;
 }
 
 function compactStyle(style = {}) {
@@ -48,9 +149,15 @@ function compactStyle(style = {}) {
     "fontWeight",
     "fontSize",
     "lineHeightPx",
+    "lineHeightPercent",
+    "lineHeightUnit",
     "letterSpacing",
+    "paragraphSpacing",
+    "paragraphIndent",
     "textAlignHorizontal",
     "textAlignVertical",
+    "textCase",
+    "textDecoration",
   ].forEach((key) => {
     if (style[key] !== undefined && style[key] !== null) {
       result[key] = style[key];
@@ -60,7 +167,40 @@ function compactStyle(style = {}) {
   return Object.keys(result).length ? result : undefined;
 }
 
-function summarizeNode(node, depth = 0, counter = { count: 0 }) {
+function collectImagePaints(node, imageRefs = new Map()) {
+  if (!node || typeof node !== "object") {
+    return imageRefs;
+  }
+
+  const paintCollections = [node.fills, node.strokes].filter(Array.isArray);
+  paintCollections.forEach((collection) => {
+    collection.forEach((paint) => {
+      if (paint?.type !== "IMAGE" || !paint.imageRef) {
+        return;
+      }
+
+      const existing = imageRefs.get(paint.imageRef) || {
+        imageRef: paint.imageRef,
+        nodes: [],
+        scaleMode: paint.scaleMode,
+      };
+      existing.nodes.push({
+        id: node.id,
+        name: node.name,
+        type: node.type,
+      });
+      imageRefs.set(paint.imageRef, existing);
+    });
+  });
+
+  if (Array.isArray(node.children)) {
+    node.children.forEach((child) => collectImagePaints(child, imageRefs));
+  }
+
+  return imageRefs;
+}
+
+function summarizeNode(node, depth = 0, counter = { count: 0 }, rootBox = null) {
   if (!node || typeof node !== "object" || counter.count >= MAX_FIGMA_TREE_NODES || depth > MAX_FIGMA_TREE_DEPTH) {
     return null;
   }
@@ -68,13 +208,23 @@ function summarizeNode(node, depth = 0, counter = { count: 0 }) {
   counter.count += 1;
 
   const box = node.absoluteBoundingBox || {};
+  const currentRootBox = rootBox || box;
   const summary = {
     id: node.id,
     name: node.name,
     type: node.type,
     visible: node.visible !== false,
-    width: typeof box.width === "number" ? Math.round(box.width * 100) / 100 : undefined,
-    height: typeof box.height === "number" ? Math.round(box.height * 100) / 100 : undefined,
+    box: compactBox(box, currentRootBox),
+    renderBounds: compactBox(node.absoluteRenderBounds, currentRootBox),
+    constraints: compactConstraint(node.constraints),
+    opacity: roundNumber(node.opacity, 1000),
+    blendMode: node.blendMode,
+    clipsContent: node.clipsContent,
+    preserveRatio: node.preserveRatio,
+    layoutAlign: node.layoutAlign,
+    layoutGrow: roundNumber(node.layoutGrow),
+    layoutSizingHorizontal: node.layoutSizingHorizontal,
+    layoutSizingVertical: node.layoutSizingVertical,
   };
 
   if (node.type === "TEXT") {
@@ -88,6 +238,10 @@ function summarizeNode(node, depth = 0, counter = { count: 0 }) {
       primaryAxisAlignItems: node.primaryAxisAlignItems,
       counterAxisAlignItems: node.counterAxisAlignItems,
       itemSpacing: node.itemSpacing,
+      counterAxisSpacing: node.counterAxisSpacing,
+      primaryAxisSizingMode: node.primaryAxisSizingMode,
+      counterAxisSizingMode: node.counterAxisSizingMode,
+      strokesIncludedInLayout: node.strokesIncludedInLayout,
       paddingLeft: node.paddingLeft,
       paddingRight: node.paddingRight,
       paddingTop: node.paddingTop,
@@ -105,11 +259,19 @@ function summarizeNode(node, depth = 0, counter = { count: 0 }) {
   if (strokes.length) {
     summary.strokes = strokes;
     summary.strokeWeight = node.strokeWeight;
+    summary.strokeAlign = node.strokeAlign;
+    summary.strokeDashes = node.strokeDashes;
   }
 
   if (typeof node.cornerRadius === "number") {
     summary.cornerRadius = node.cornerRadius;
   }
+
+  ["topLeftRadius", "topRightRadius", "bottomRightRadius", "bottomLeftRadius"].forEach((key) => {
+    if (typeof node[key] === "number") {
+      summary[key] = roundNumber(node[key]);
+    }
+  });
 
   if (Array.isArray(node.effects) && node.effects.length) {
     summary.effects = node.effects
@@ -117,17 +279,30 @@ function summarizeNode(node, depth = 0, counter = { count: 0 }) {
       .slice(0, 4)
       .map((effect) => ({
         type: effect.type,
-        radius: effect.radius,
-        offset: effect.offset,
-        color: effect.color,
+        radius: roundNumber(effect.radius),
+        offset: compactVector(effect.offset),
+        spread: roundNumber(effect.spread),
+        color: compactColor(effect.color),
       }));
+  }
+
+  if (node.styles && typeof node.styles === "object") {
+    summary.styles = node.styles;
+  }
+
+  if (Array.isArray(node.exportSettings) && node.exportSettings.length) {
+    summary.exportSettings = node.exportSettings.slice(0, 4).map((setting) => ({
+      format: setting.format,
+      suffix: setting.suffix,
+      constraint: setting.constraint,
+    }));
   }
 
   if (Array.isArray(node.children) && node.children.length && depth < MAX_FIGMA_TREE_DEPTH) {
     const children = [];
 
     for (const child of node.children) {
-      const childSummary = summarizeNode(child, depth + 1, counter);
+      const childSummary = summarizeNode(child, depth + 1, counter, currentRootBox);
 
       if (childSummary) {
         children.push(childSummary);
@@ -144,6 +319,22 @@ function summarizeNode(node, depth = 0, counter = { count: 0 }) {
   }
 
   return summary;
+}
+
+function buildAssetReferences(nodeDocument, nodePayload) {
+  const imageRefs = collectImagePaints(nodeDocument);
+  const figmaImages = nodePayload?.meta?.images || {};
+
+  return Array.from(imageRefs.values())
+    .slice(0, MAX_FIGMA_ASSETS)
+    .map((asset) => ({
+      kind: "image-fill",
+      imageRef: asset.imageRef,
+      url: String(figmaImages[asset.imageRef] || "").trim(),
+      scaleMode: asset.scaleMode,
+      nodes: asset.nodes.slice(0, 8),
+    }))
+    .filter((asset) => asset.url);
 }
 
 export function parseFigmaNodeUrl(value) {
@@ -217,5 +408,9 @@ export async function fetchFigmaImportContext(figmaUrl, options = {}) {
     height: typeof box.height === "number" ? box.height : 0,
     imageUrl: String(imagePayload?.images?.[target.nodeId] || "").trim(),
     nodeTree: summarizeNode(nodeDocument),
+    assets: buildAssetReferences(nodeDocument, nodePayload),
+    components: nodePayload?.components || undefined,
+    componentSets: nodePayload?.componentSets || undefined,
+    styles: nodePayload?.styles || undefined,
   };
 }

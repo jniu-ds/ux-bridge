@@ -424,17 +424,27 @@ function buildFigmaImportUserText({ prompt, projectName, pageName, figmaImport }
     nodeId: figmaImport?.nodeId,
     name: figmaImport?.name,
     type: figmaImport?.type,
-    width: figmaImport?.width,
-    height: figmaImport?.height,
+    nativeSize: {
+      width: figmaImport?.width,
+      height: figmaImport?.height,
+    },
+    assets: Array.isArray(figmaImport?.assets) ? figmaImport.assets : [],
+    components: figmaImport?.components,
+    componentSets: figmaImport?.componentSets,
+    styles: figmaImport?.styles,
     nodeTree: figmaImport?.nodeTree,
   };
 
   return [
     "Recreate this Figma node as a UX Bridge page-scoped mobile preview.",
-    "Aim for a 1:1 visual match at the source design size while making the layout responsive at all screen sizes.",
-    "Use the attached Figma screenshot as the visual source of truth and the Figma node metadata for structure, text, spacing, colors, and hierarchy.",
+    "Use the attached Figma screenshot as the visual source of truth. Use the Figma metadata for exact structure, text, typography, fills, strokes, shadows, radii, spacing, constraints, auto-layout, and asset references.",
+    "At the Figma node's native width, match the screenshot as closely as possible: hierarchy, alignment, typography, colors, border radii, shadows, spacing, and proportions.",
+    "Use any provided image asset URLs for image fills or media-like content. Preserve their aspect ratio and crop/fit behavior according to the metadata when possible.",
     "Do not create app chrome, device frames, inspector UI, navigation rails, or browser UI.",
-    "If the Figma node is desktop-sized, translate it into a responsive .vibe-generated-page that preserves the design language and adapts gracefully down to mobile.",
+    "Generate real HTML/CSS rather than flattening the screenshot into one image.",
+    "Make the result responsive: treat the Figma node as the source design at its native breakpoint, preserve that exact design at the imported width, convert fixed layout into flex/grid/minmax/clamp where safe, and add media queries only when needed to fit smaller or wider screens without changing the source visual intent.",
+    "Keep typography, spacing, and aspect ratios stable across breakpoints. Avoid viewport-scaled font sizes.",
+    "If the Figma node is desktop-sized, adapt gracefully down to mobile while preserving the same content hierarchy and design language.",
     [
       `Project: ${projectName}`,
       `Page: ${pageName}`,
