@@ -74,6 +74,24 @@ function compactBox(box = {}, rootBox = null) {
   return Object.keys(result).length ? result : undefined;
 }
 
+function compactParentRelativeBox(box = {}, parentBox = null) {
+  if (!box || !parentBox || typeof box !== "object" || typeof parentBox !== "object") {
+    return undefined;
+  }
+
+  const result = compactVector(box) || {};
+
+  if (typeof box.x === "number" && typeof parentBox.x === "number") {
+    result.parentX = roundNumber(box.x - parentBox.x);
+  }
+
+  if (typeof box.y === "number" && typeof parentBox.y === "number") {
+    result.parentY = roundNumber(box.y - parentBox.y);
+  }
+
+  return Object.keys(result).length ? result : undefined;
+}
+
 function compactConstraint(constraints = {}) {
   if (!constraints || typeof constraints !== "object") {
     return undefined;
@@ -300,7 +318,7 @@ function collectVectorAssetNodes(node, vectorNodes = []) {
   return vectorNodes;
 }
 
-function summarizeNode(node, depth = 0, counter = { count: 0 }, rootBox = null, assetContext = {}) {
+function summarizeNode(node, depth = 0, counter = { count: 0 }, rootBox = null, assetContext = {}, parentBox = null) {
   if (!node || typeof node !== "object" || counter.count >= MAX_FIGMA_TREE_NODES || depth > MAX_FIGMA_TREE_DEPTH) {
     return null;
   }
@@ -315,6 +333,7 @@ function summarizeNode(node, depth = 0, counter = { count: 0 }, rootBox = null, 
     type: node.type,
     visible: node.visible !== false,
     box: compactBox(box, currentRootBox),
+    parentRelativeBox: compactParentRelativeBox(box, parentBox),
     renderBounds: compactBox(node.absoluteRenderBounds, currentRootBox),
     constraints: compactConstraint(node.constraints),
     opacity: roundNumber(node.opacity, 1000),
@@ -408,7 +427,7 @@ function summarizeNode(node, depth = 0, counter = { count: 0 }, rootBox = null, 
     const children = [];
 
     for (const child of node.children) {
-      const childSummary = summarizeNode(child, depth + 1, counter, currentRootBox, assetContext);
+      const childSummary = summarizeNode(child, depth + 1, counter, currentRootBox, assetContext, box);
 
       if (childSummary) {
         children.push(childSummary);
