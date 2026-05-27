@@ -394,6 +394,27 @@ function buildCodexSystemPrompt() {
   ].join(" ");
 }
 
+function buildFigmaImportSystemPrompt() {
+  return [
+    "You generate only front-end page content for UX Bridge previews.",
+    "Return JSON only.",
+    "Do not generate a whole application shell, routing, auth, backend code, or head/body/html tags.",
+    "Generate only content that belongs inside the current preview content area.",
+    "The html must use a single root element with class=\"vibe-generated-page\".",
+    "The css must scope all selectors to .vibe-generated-page and must not target body, html, :root, or global app shells.",
+    "For Figma imports, build a responsive preview by default, not a fixed mobile-only rendering.",
+    "The imported Figma width is the native source breakpoint. Match it closely at that width, then adapt fluidly wider and narrower.",
+    "Use CSS grid, flex, minmax, clamp, max-width, and media queries where appropriate.",
+    "Do not lock the whole page to a phone-sized width or max-width unless the Figma node is explicitly a phone/device screen.",
+    "If the Figma node is tablet or desktop sized, preserve multi-column layout at the native width and larger widths instead of collapsing to one mobile column.",
+    "Do not include <script> tags or inline event handlers.",
+    "Put interaction code in the js field for preview.js. The js runs after HTML mounts as new Function(\"root\", \"page\", \"project\", \"api\", js).",
+    "Use root.querySelector/querySelectorAll to attach scoped event listeners, manage local state in closure variables, and return a cleanup function when listeners or timers are created.",
+    "Do not use imports, exports, network requests, document.write, inline handlers, or selectors outside root.",
+    "Keep the output polished, intentional, and faithful to the Figma visual source.",
+  ].join(" ");
+}
+
 function buildCodexUserPrompt({
   prompt,
   projectName,
@@ -436,7 +457,7 @@ function buildFigmaImportUserText({ prompt, projectName, pageName, figmaImport }
   };
 
   return [
-    "Recreate this Figma node as a UX Bridge page-scoped mobile preview.",
+    "Recreate this Figma node as a UX Bridge page-scoped responsive preview.",
     "Use the attached Figma screenshot as the visual source of truth. Use the Figma metadata for exact structure, text, typography, fills, strokes, shadows, radii, spacing, constraints, auto-layout, and asset references.",
     "At the Figma node's native width, match the screenshot as closely as possible: hierarchy, alignment, typography, colors, border radii, shadows, spacing, and proportions.",
     "The metadata assets array contains exported Figma image fills and rendered image nodes. Use those asset URLs directly in img tags or CSS background-image declarations whenever the Figma node has pictures, photos, illustrations, logos, or image background fills.",
@@ -445,6 +466,10 @@ function buildFigmaImportUserText({ prompt, projectName, pageName, figmaImport }
     "Do not create app chrome, device frames, inspector UI, navigation rails, or browser UI.",
     "Generate real HTML/CSS rather than flattening the screenshot into one image.",
     "Make the result responsive: treat the Figma node as the source design at its native breakpoint, preserve that exact design at the imported width, convert fixed layout into flex/grid/minmax/clamp where safe, and add media queries only when needed to fit smaller or wider screens without changing the source visual intent.",
+    "If the native width is 700px or wider, keep the imported layout tablet/desktop-first at the native width and above. Do not collapse cards, sidebars, tables, or columns into a mobile stack by default.",
+    "If the native width is 480px or narrower and the Figma node is a phone screen, match that mobile design at the native width, then add responsive expansion rules so the content can use wider preview widths when appropriate.",
+    "Avoid fixed width wrappers like width:375px, width:390px, max-width:430px, or phone-only containers on .vibe-generated-page unless the selected Figma node is literally a device mockup or phone frame.",
+    "For repeated cards, lists, dashboard sections, and galleries, prefer responsive grid rules such as repeat(auto-fit, minmax(...)) or breakpoint-specific media queries.",
     "Keep typography, spacing, and aspect ratios stable across breakpoints. Avoid viewport-scaled font sizes.",
     "If the Figma node is desktop-sized, adapt gracefully down to mobile while preserving the same content hierarchy and design language.",
     [
@@ -598,7 +623,7 @@ async function generateCodexPageResult({
   }
 
   const requestBody = {
-    instructions: buildCodexSystemPrompt(),
+    instructions: figmaImport ? buildFigmaImportSystemPrompt() : buildCodexSystemPrompt(),
     input: figmaImport
       ? buildStructuredCodexRequest({
           userText: buildFigmaImportUserText({ prompt, projectName, pageName, figmaImport }),
