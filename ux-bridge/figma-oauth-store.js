@@ -8,6 +8,7 @@ import {
 } from "./auth-store.js";
 
 const FIGMA_PROVIDER_ID = "figma";
+const FIGMA_API_BASE_URL = "https://api.figma.com/v1";
 const FIGMA_AUTH_URL = "https://www.figma.com/oauth";
 const FIGMA_TOKEN_URL = "https://api.figma.com/v1/oauth/token";
 const FIGMA_SCOPE = "file_read";
@@ -28,6 +29,10 @@ function readFigmaOauthConfig() {
 }
 
 function isConfigured() {
+  return true;
+}
+
+function isOauthConfigured() {
   const config = readFigmaOauthConfig();
   return Boolean(config.clientId && config.clientSecret);
 }
@@ -175,7 +180,7 @@ async function refreshToken(storedToken) {
   const config = readFigmaOauthConfig();
   const refreshTokenValue = String(storedToken?.refreshToken || "").trim();
 
-  if (!refreshTokenValue || !isConfigured()) {
+  if (!refreshTokenValue || !isOauthConfigured()) {
     return storedToken;
   }
 
@@ -239,6 +244,39 @@ async function requireUser(req) {
   return email ? { session, email } : null;
 }
 
+async function readJsonBody(req) {
+  const chunks = [];
+
+  for await (const chunk of req) {
+    chunks.push(Buffer.from(chunk));
+  }
+
+  if (!chunks.length) {
+    return {};
+  }
+
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  } catch {
+    return {};
+  }
+}
+
+async function verifyFigmaPat(token) {
+  const response = await fetch(`${FIGMA_API_BASE_URL}/me`, {
+    headers: {
+      "X-Figma-Token": token,
+    },
+  });
+  const payload = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw new Error(payload?.message || payload?.err || "Figma rejected that Personal Access Token.");
+  }
+
+  return payload && typeof payload === "object" ? payload : {};
+}
+
 async function handleStatus(req) {
   const user = await requireUser(req);
 
@@ -255,9 +293,7 @@ async function handleStatus(req) {
       ok: true,
       configured: isConfigured(),
       connected: Boolean(await readFigmaUserAccessToken(user.email)),
-      connectUrl: `/api/figma?action=oauth-start&returnTo=${encodeURIComponent(
-        normalizeReturnTo(new URL(req.url || "/", getOrigin(req)).searchParams.get("returnTo") || "/", req),
-      )}`,
+      connectionType: "personal-access-token",
     },
   };
 }
@@ -269,7 +305,7 @@ async function handleStart(req) {
     return { status: 302, headers: { Location: "/" }, payload: null };
   }
 
-  if (!isConfigured()) {
+  if (!isOauthConfigured()) {
     return {
       status: 302,
       headers: {
@@ -379,6 +415,54 @@ async function handleDisconnect(req) {
   return { status: 200, payload: { ok: true, connected: false } };
 }
 
+async function handleSaveToken(req) {
+  const user = await requireUser(req);
+
+  if (!user) {
+    return { status: 401, payload: { ok: false, error: "Sign in before connecting Figma." } };
+  }
+
+  const body = await readJsonBody(req);
+  const token = String(body?.token || "").trim();
+
+  if (!token) {
+    return { status: 400, payload: { ok: false, error: "Paste your Figma Personal Access Token first." } };
+  }
+
+  let figmaUser = {};
+
+  try {
+    figmaUser = await verifyFigmaPat(token);
+  } catch (error) {
+    return {
+      status: 400,
+      payload: {
+        ok: false,
+        error: error instanceof Error ? error.message : "Figma rejected that Personal Access Token.",
+      },
+    };
+  }
+
+  const label = String(figmaUser.handle || figmaUser.email || figmaUser.id || "Figma").trim();
+  const secretPayload = {
+    accessToken: token,
+    tokenType: "pat",
+    userId: String(figmaUser.id || "").trim(),
+    handle: String(figmaUser.handle || "").trim(),
+    email: String(figmaUser.email || "").trim(),
+    connectedAt: Date.now(),
+  };
+
+  await writeUserIntegrationSecret(user.email, FIGMA_PROVIDER_ID, JSON.stringify(secretPayload), {
+    connected: true,
+    accountLabel: label,
+    connectedAt: Date.now(),
+    lastVerifiedAt: Date.now(),
+  });
+
+  return { status: 200, payload: { ok: true, connected: true, accountLabel: label } };
+}
+
 export async function handleFigmaRequest(req) {
   const url = new URL(req.url || "/", getOrigin(req));
   const pathname = url.pathname;
@@ -398,6 +482,10 @@ export async function handleFigmaRequest(req) {
 
   if (req.method === "POST" && (pathname === "/api/figma/disconnect" || action === "disconnect")) {
     return handleDisconnect(req);
+  }
+
+  if (req.method === "POST" && (pathname === "/api/figma/token" || action === "save-token")) {
+    return handleSaveToken(req);
   }
 
   return { status: 404, payload: { ok: false, error: "Figma endpoint not found." } };

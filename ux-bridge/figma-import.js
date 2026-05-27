@@ -183,7 +183,8 @@ export async function fetchFigmaImportContext(figmaUrl, options = {}) {
   }
 
   const target = parseFigmaNodeUrl(figmaUrl);
-  const headers = options.accessToken ? { Authorization: `Bearer ${token}` } : { "X-Figma-Token": token };
+  const headers =
+    options.authScheme === "bearer" ? { Authorization: `Bearer ${token}` } : { "X-Figma-Token": token };
   const nodeResponse = await fetch(
     `${FIGMA_API_BASE_URL}/files/${encodeURIComponent(target.fileKey)}/nodes?ids=${encodeURIComponent(target.nodeId)}`,
     { headers },
