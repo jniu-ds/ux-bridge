@@ -6,12 +6,18 @@
   window.__uxBridgeFigmaImportRuntime = true;
 
   const PROJECTS_API = "/api/projects";
+  const FIGMA_API = "/api/figma";
   const MODAL_ID = "ux-figma-import-modal";
   const STYLE_ID = "ux-figma-import-styles";
   const state = {
     open: false,
     loading: false,
+    checkingConnection: false,
+    configured: false,
+    connected: false,
+    savingToken: false,
     error: "",
+    token: "",
     url: "",
   };
 
@@ -102,6 +108,11 @@
         box-shadow: 0 0 0 4px rgba(139, 92, 246, 0.14);
       }
 
+      .figma-import-dialog input[type="password"] {
+        font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+        letter-spacing: 0;
+      }
+
       .figma-import-dialog__error {
         padding: 12px 14px;
         border-radius: 14px;
@@ -139,6 +150,34 @@
         background: #252525;
         color: #ffffff;
       }
+
+      .figma-import-dialog__connect {
+        display: grid;
+        gap: 12px;
+        padding: 16px;
+        border: 1px solid rgba(124, 58, 237, 0.18);
+        border-radius: 18px;
+        background: rgba(250, 245, 255, 0.72);
+      }
+
+      .figma-import-dialog__connect button {
+        width: fit-content;
+        background: #7c3aed;
+        color: #ffffff;
+      }
+
+      .figma-import-dialog__connect-actions {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+
+      .figma-import-dialog__connect-actions button[data-figma-import-disconnect] {
+        background: transparent;
+        color: #64748b;
+        padding: 0 4px;
+      }
     `;
     document.head.append(style);
   }
@@ -161,8 +200,28 @@
   function openModal() {
     state.open = true;
     state.loading = false;
+    state.checkingConnection = true;
     state.error = "";
     renderModal();
+    void checkFigmaConnection();
+  }
+
+  async function checkFigmaConnection() {
+    try {
+      const returnTo = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+      const response = await fetch(`${FIGMA_API}?action=status&returnTo=${encodeURIComponent(returnTo)}`, {
+        credentials: "include",
+      });
+      const payload = await response.json().catch(() => ({}));
+      state.configured = Boolean(payload?.configured);
+      state.connected = Boolean(payload?.connected);
+      state.error = response.ok ? state.error : payload?.error || "Sign in before connecting Figma.";
+    } catch {
+      state.error = "Unable to check your Figma connection.";
+    } finally {
+      state.checkingConnection = false;
+      renderModal();
+    }
   }
 
   function renderModal() {
@@ -182,6 +241,29 @@
       document.body.append(modal);
     }
 
+    const canImport = state.connected && !state.checkingConnection;
+    const connectionContent = state.checkingConnection
+      ? `<p>Checking your Figma connection...</p>`
+      : state.connected
+        ? `<div class="figma-import-dialog__connect">
+            <p>Your Figma Personal Access Token is saved for this account.</p>
+            <div class="figma-import-dialog__connect-actions">
+              <button type="button" data-figma-import-disconnect ${state.loading ? "disabled" : ""}>Replace token</button>
+            </div>
+          </div>`
+        : `<div class="figma-import-dialog__connect">
+            <p>Paste a Figma Personal Access Token so UX Bridge can read the frame you choose. This is saved only for your UX Bridge account.</p>
+            <label>
+              Personal Access Token
+              <input type="password" data-figma-import-token placeholder="figd_..." value="${escapeAttribute(state.token)}" ${state.loading || state.savingToken ? "disabled" : ""} />
+            </label>
+            <div class="figma-import-dialog__connect-actions">
+              <button type="button" data-figma-import-save-token ${state.loading || state.savingToken ? "disabled" : ""}>
+                ${state.savingToken ? "Saving..." : "Save token"}
+              </button>
+            </div>
+          </div>`;
+
     modal.innerHTML = `
       <form class="figma-import-dialog" data-figma-import-form>
         <div class="figma-import-dialog__body">
@@ -190,14 +272,15 @@
             <h2>Import from Figma</h2>
           </div>
           <p>Paste a Figma frame or layer URL. UX Bridge will recreate it in this preview with Codex.</p>
+          ${connectionContent}
           <label>
             Figma URL
-            <input type="url" data-figma-import-url placeholder="https://www.figma.com/design/..." value="${escapeAttribute(state.url)}" ${state.loading ? "disabled" : ""} />
+            <input type="url" data-figma-import-url placeholder="https://www.figma.com/design/..." value="${escapeAttribute(state.url)}" ${state.loading || !canImport ? "disabled" : ""} />
           </label>
           ${state.error ? `<p class="figma-import-dialog__error">${escapeHtml(state.error)}</p>` : ""}
           <div class="figma-import-dialog__actions">
             <button type="button" class="figma-import-dialog__cancel" data-figma-import-cancel ${state.loading ? "disabled" : ""}>Cancel</button>
-            <button type="submit" class="figma-import-dialog__submit" ${state.loading ? "disabled" : ""}>
+            <button type="submit" class="figma-import-dialog__submit" ${state.loading || !canImport ? "disabled" : ""}>
               ${state.loading ? "Importing..." : "Import"}
             </button>
           </div>
@@ -212,6 +295,15 @@
     };
 
     modal.querySelector("[data-figma-import-cancel]")?.addEventListener("click", closeModal);
+    modal.querySelector("[data-figma-import-save-token]")?.addEventListener("click", () => {
+      void saveFigmaToken();
+    });
+    modal.querySelector("[data-figma-import-disconnect]")?.addEventListener("click", () => {
+      void disconnectFigmaToken();
+    });
+    modal.querySelector("[data-figma-import-token]")?.addEventListener("input", (event) => {
+      state.token = event.currentTarget.value;
+    });
     modal.querySelector("[data-figma-import-url]")?.addEventListener("input", (event) => {
       state.url = event.currentTarget.value;
     });
@@ -221,7 +313,11 @@
     });
 
     window.requestAnimationFrame(() => {
-      modal.querySelector("[data-figma-import-url]")?.focus();
+      if (canImport) {
+        modal.querySelector("[data-figma-import-url]")?.focus();
+      } else if (!state.checkingConnection) {
+        modal.querySelector("[data-figma-import-token]")?.focus();
+      }
     });
   }
 
@@ -275,6 +371,10 @@
       const payload = await response.json().catch(() => ({}));
 
       if (!response.ok || !payload?.ok || !payload?.project) {
+        if (payload?.code === "FIGMA_NOT_CONNECTED") {
+          state.connected = false;
+          void checkFigmaConnection();
+        }
         throw new Error(payload?.error || "Unable to import that Figma design.");
       }
 
@@ -287,6 +387,64 @@
     } catch (error) {
       state.loading = false;
       state.error = error instanceof Error ? error.message : "Unable to import that Figma design.";
+      renderModal();
+    }
+  }
+
+  async function saveFigmaToken() {
+    const token = String(state.token || "").trim();
+
+    if (!token) {
+      state.error = "Paste your Figma Personal Access Token first.";
+      renderModal();
+      return;
+    }
+
+    state.savingToken = true;
+    state.error = "";
+    renderModal();
+
+    try {
+      const response = await fetch(`${FIGMA_API}?action=save-token`, {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ token }),
+      });
+      const payload = await response.json().catch(() => ({}));
+
+      if (!response.ok || !payload?.ok) {
+        throw new Error(payload?.error || "Unable to save that Figma token.");
+      }
+
+      state.connected = true;
+      state.token = "";
+    } catch (error) {
+      state.error = error instanceof Error ? error.message : "Unable to save that Figma token.";
+    } finally {
+      state.savingToken = false;
+      renderModal();
+    }
+  }
+
+  async function disconnectFigmaToken() {
+    state.savingToken = true;
+    state.error = "";
+    renderModal();
+
+    try {
+      await fetch(`${FIGMA_API}?action=disconnect`, {
+        method: "POST",
+        credentials: "include",
+      });
+    } catch {
+      state.error = "Unable to replace the saved Figma token.";
+    } finally {
+      state.connected = false;
+      state.savingToken = false;
+      state.token = "";
       renderModal();
     }
   }
