@@ -1664,29 +1664,37 @@ export async function writeUserIntegrationSecret(email, providerId, secretValue,
   };
 
   if (isSecretVaultConfigured()) {
-    const vaultRecord = await writeSecretToVault(secretValue, {
-      providerId: normalizedProviderId,
-      secretName: existingRecord?.vaultSecretName,
-      tags: {
-        app: "ux-bridge",
-        type: "integration-secret",
+    try {
+      const vaultRecord = await writeSecretToVault(secretValue, {
         providerId: normalizedProviderId,
-        emailHash: crypto.createHash("sha256").update(normalizedEmail).digest("hex").slice(0, 12),
-      },
-    });
+        secretName: existingRecord?.vaultSecretName,
+        tags: {
+          app: "ux-bridge",
+          type: "integration-secret",
+          providerId: normalizedProviderId,
+          emailHash: crypto.createHash("sha256").update(normalizedEmail).digest("hex").slice(0, 12),
+        },
+      });
 
-    await writeStoredIntegrationSecret(normalizedEmail, normalizedProviderId, {
-      ...existingRecord,
-      ...nextMetadata,
-      encryptedSecret: "",
-      storageMode: "vault",
-      vaultProvider: vaultRecord?.provider || "azure-key-vault",
-      vaultSecretName: vaultRecord?.secretName || existingRecord?.vaultSecretName || "",
-      vaultSecretVersion: vaultRecord?.secretVersion || "",
-      vaultSecretId: vaultRecord?.secretId || "",
-      vaultUrl: vaultRecord?.vaultUrl || existingRecord?.vaultUrl || "",
-    });
-    return;
+      await writeStoredIntegrationSecret(normalizedEmail, normalizedProviderId, {
+        ...existingRecord,
+        ...nextMetadata,
+        encryptedSecret: "",
+        storageMode: "vault",
+        vaultProvider: vaultRecord?.provider || "azure-key-vault",
+        vaultSecretName: vaultRecord?.secretName || existingRecord?.vaultSecretName || "",
+        vaultSecretVersion: vaultRecord?.secretVersion || "",
+        vaultSecretId: vaultRecord?.secretId || "",
+        vaultUrl: vaultRecord?.vaultUrl || existingRecord?.vaultUrl || "",
+      });
+      return;
+    } catch (error) {
+      console.error("[auth] failed to write vault integration secret; falling back to encrypted record", {
+        email: normalizedEmail,
+        providerId: normalizedProviderId,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   const encryptedSecret = encryptIntegrationSecret(secretValue);
