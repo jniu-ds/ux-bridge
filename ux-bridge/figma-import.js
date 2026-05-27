@@ -2,6 +2,24 @@ const FIGMA_API_BASE_URL = "https://api.figma.com/v1";
 const MAX_FIGMA_TREE_NODES = 220;
 const MAX_FIGMA_TREE_DEPTH = 10;
 const MAX_FIGMA_ASSETS = 40;
+const MAX_FIGMA_VECTOR_ASSETS = 32;
+const VECTOR_ASSET_TYPES = new Set([
+  "BOOLEAN_OPERATION",
+  "COMPONENT",
+  "COMPONENT_SET",
+  "ELLIPSE",
+  "FRAME",
+  "GROUP",
+  "INSTANCE",
+  "LINE",
+  "POLYGON",
+  "RECTANGLE",
+  "REGULAR_POLYGON",
+  "SECTION",
+  "SLICE",
+  "STAR",
+  "VECTOR",
+]);
 
 function readFigmaAccessToken(explicitToken = "") {
   return String(
@@ -205,6 +223,60 @@ function getImageFillEntries(nodeDocument) {
   return Array.from(collectImagePaints(nodeDocument).values()).slice(0, MAX_FIGMA_ASSETS);
 }
 
+function isLikelyVectorAssetNode(node = {}) {
+  if (!node || typeof node !== "object" || node.visible === false || !VECTOR_ASSET_TYPES.has(node.type)) {
+    return false;
+  }
+
+  const box = node.absoluteBoundingBox || {};
+  const width = typeof box.width === "number" ? box.width : 0;
+  const height = typeof box.height === "number" ? box.height : 0;
+
+  if (!width || !height || width > 256 || height > 256) {
+    return false;
+  }
+
+  const name = String(node.name || "").toLowerCase();
+  const hasVectorType = ["VECTOR", "BOOLEAN_OPERATION", "ELLIPSE", "LINE", "POLYGON", "REGULAR_POLYGON", "STAR"].includes(
+    node.type,
+  );
+  const isNamedLikeIcon = /\b(icon|svg|glyph|symbol|logo|mark|chevron|arrow|menu|nav|tab|battery|wifi|signal|home|scan|learn|shop|history)\b/.test(
+    name,
+  );
+  const hasExplicitSvgExport = Array.isArray(node.exportSettings)
+    ? node.exportSettings.some((setting) => String(setting?.format || "").toUpperCase() === "SVG")
+    : false;
+
+  return hasVectorType || isNamedLikeIcon || hasExplicitSvgExport;
+}
+
+function collectVectorAssetNodes(node, vectorNodes = []) {
+  if (!node || typeof node !== "object" || vectorNodes.length >= MAX_FIGMA_VECTOR_ASSETS) {
+    return vectorNodes;
+  }
+
+  if (isLikelyVectorAssetNode(node)) {
+    vectorNodes.push({
+      id: node.id,
+      name: node.name,
+      type: node.type,
+      box: compactBox(node.absoluteBoundingBox),
+    });
+  }
+
+  if (Array.isArray(node.children)) {
+    for (const child of node.children) {
+      collectVectorAssetNodes(child, vectorNodes);
+
+      if (vectorNodes.length >= MAX_FIGMA_VECTOR_ASSETS) {
+        break;
+      }
+    }
+  }
+
+  return vectorNodes;
+}
+
 function summarizeNode(node, depth = 0, counter = { count: 0 }, rootBox = null, assetContext = {}) {
   if (!node || typeof node !== "object" || counter.count >= MAX_FIGMA_TREE_NODES || depth > MAX_FIGMA_TREE_DEPTH) {
     return null;
@@ -231,6 +303,7 @@ function summarizeNode(node, depth = 0, counter = { count: 0 }, rootBox = null, 
     layoutSizingHorizontal: node.layoutSizingHorizontal,
     layoutSizingVertical: node.layoutSizingVertical,
     renderedAssetUrl: assetContext.nodeExportUrls?.get?.(node.id),
+    vectorAssetUrl: assetContext.vectorAssetUrls?.get?.(node.id),
   };
 
   if (node.type === "TEXT") {
@@ -331,9 +404,10 @@ function summarizeNode(node, depth = 0, counter = { count: 0 }, rootBox = null, 
   return summary;
 }
 
-function buildAssetReferences(imageFillEntries, imageFillPayload = {}, nodeExportPayload = {}) {
+function buildAssetReferences(imageFillEntries, imageFillPayload = {}, nodeExportPayload = {}, vectorExportPayload = {}) {
   const imageFillUrls = imageFillPayload?.images || {};
   const nodeExportUrls = nodeExportPayload?.images || {};
+  const vectorExportUrls = vectorExportPayload?.images || {};
   const assets = [];
 
   imageFillEntries.forEach((asset) => {
@@ -367,7 +441,24 @@ function buildAssetReferences(imageFillEntries, imageFillPayload = {}, nodeExpor
     });
   });
 
-  return assets.slice(0, MAX_FIGMA_ASSETS);
+  Object.entries(vectorExportUrls).forEach(([nodeId, url]) => {
+    const trimmedUrl = String(url || "").trim();
+
+    if (!trimmedUrl || assets.some((asset) => asset.nodeId === nodeId && asset.url === trimmedUrl)) {
+      return;
+    }
+
+    assets.push({
+      kind: "svg-icon",
+      nodeId,
+      url: trimmedUrl,
+    });
+  });
+
+  return [
+    ...assets.filter((asset) => asset.kind === "svg-icon"),
+    ...assets.filter((asset) => asset.kind !== "svg-icon"),
+  ].slice(0, MAX_FIGMA_ASSETS);
 }
 
 export function parseFigmaNodeUrl(value) {
@@ -427,6 +518,7 @@ export async function fetchFigmaImportContext(figmaUrl, options = {}) {
   }
 
   const imageFillEntries = getImageFillEntries(nodeDocument);
+  const vectorAssetNodes = collectVectorAssetNodes(nodeDocument);
   const imageFillResponse = await fetch(`${FIGMA_API_BASE_URL}/files/${encodeURIComponent(target.fileKey)}/images`, {
     headers,
   });
@@ -435,6 +527,7 @@ export async function fetchFigmaImportContext(figmaUrl, options = {}) {
     new Set(imageFillEntries.flatMap((asset) => asset.nodes.map((node) => node.id)).filter(Boolean)),
   ).slice(0, MAX_FIGMA_ASSETS);
   let nodeExportPayload = {};
+  let vectorExportPayload = {};
 
   if (imageFillNodeIds.length) {
     const nodeExportResponse = await fetch(
@@ -444,13 +537,56 @@ export async function fetchFigmaImportContext(figmaUrl, options = {}) {
     nodeExportPayload = nodeExportResponse.ok ? await nodeExportResponse.json().catch(() => ({})) : {};
   }
 
+  const vectorNodeIds = vectorAssetNodes.map((node) => node.id).filter(Boolean);
+
+  if (vectorNodeIds.length) {
+    const vectorExportResponse = await fetch(
+      `${FIGMA_API_BASE_URL}/images/${encodeURIComponent(target.fileKey)}?ids=${encodeURIComponent(vectorNodeIds.join(","))}&format=svg`,
+      { headers },
+    );
+    const payload = vectorExportResponse.ok ? await vectorExportResponse.json().catch(() => ({})) : {};
+    const exportedUrls = payload?.images || {};
+    vectorExportPayload = {
+      images: Object.fromEntries(
+        vectorAssetNodes
+          .map((node) => [node.id, String(exportedUrls[node.id] || "").trim(), node])
+          .filter(([, url]) => Boolean(url))
+          .map(([nodeId, url, node]) => [
+            nodeId,
+            {
+              url,
+              name: node.name,
+              type: node.type,
+              box: node.box,
+            },
+          ]),
+      ),
+    };
+  }
+
   const imageResponse = await fetch(
     `${FIGMA_API_BASE_URL}/images/${encodeURIComponent(target.fileKey)}?ids=${encodeURIComponent(target.nodeId)}&format=png&scale=2`,
     { headers },
   );
   const imagePayload = imageResponse.ok ? await imageResponse.json().catch(() => ({})) : {};
   const box = nodeDocument.absoluteBoundingBox || {};
-  const assets = buildAssetReferences(imageFillEntries, imageFillPayload, nodeExportPayload);
+  const assets = buildAssetReferences(imageFillEntries, imageFillPayload, nodeExportPayload, {
+    images: Object.fromEntries(
+      Object.entries(vectorExportPayload.images || {}).map(([nodeId, asset]) => [nodeId, asset.url]),
+    ),
+  }).map((asset) => {
+    if (asset.kind !== "svg-icon") {
+      return asset;
+    }
+
+    const vectorAsset = vectorExportPayload.images?.[asset.nodeId] || {};
+    return {
+      ...asset,
+      name: vectorAsset.name,
+      type: vectorAsset.type,
+      box: vectorAsset.box,
+    };
+  });
   const assetContext = {
     imageFillUrls: new Map(
       assets
@@ -460,6 +596,11 @@ export async function fetchFigmaImportContext(figmaUrl, options = {}) {
     nodeExportUrls: new Map(
       assets
         .filter((asset) => asset.kind === "rendered-node" && asset.nodeId && asset.url)
+        .map((asset) => [asset.nodeId, asset.url]),
+    ),
+    vectorAssetUrls: new Map(
+      assets
+        .filter((asset) => asset.kind === "svg-icon" && asset.nodeId && asset.url)
         .map((asset) => [asset.nodeId, asset.url]),
     ),
   };
