@@ -115,6 +115,104 @@
     return Boolean(currentUser?.integrations?.[providerId]?.connected);
   }
 
+  function getPreviewRenderContainer() {
+    return document.querySelector("[data-vibe-mobile-render]") || document.querySelector(".vibe-mobile-stage") || null;
+  }
+
+  function getPreviewRenderRoot() {
+    const container = getPreviewRenderContainer();
+    return (
+      container?.querySelector?.(".vibe-generated-page") ||
+      document.querySelector("[data-vibe-mobile-render] .vibe-generated-page") ||
+      document.querySelector(".vibe-generated-page") ||
+      null
+    );
+  }
+
+  function getSelectedPreviewElement() {
+    const root = getPreviewRenderRoot();
+
+    if (!root) {
+      return null;
+    }
+
+    if (root.matches?.('[data-ux-layer-selected]:not([data-ux-layer-selected="false"])')) {
+      return root;
+    }
+
+    return root.querySelector('[data-ux-layer-selected]:not([data-ux-layer-selected="false"])');
+  }
+
+  function getPreviewLayerPathForElement(element) {
+    const container = getPreviewRenderContainer();
+
+    if (!container || !element || !container.contains(element)) {
+      return "";
+    }
+
+    const segments = [];
+    let cursor = element;
+
+    while (cursor && cursor !== container) {
+      const parent = cursor.parentElement;
+
+      if (!parent) {
+        break;
+      }
+
+      segments.unshift(Array.from(parent.children).indexOf(cursor));
+      cursor = parent;
+    }
+
+    return segments.filter((segment) => segment >= 0).join(".");
+  }
+
+  function compactPreviewText(value, maxLength) {
+    const text = String(value || "");
+    return text.length > maxLength ? text.slice(0, maxLength) : text;
+  }
+
+  function buildCurrentPreviewSnapshot() {
+    const root = getPreviewRenderRoot();
+    const preview = state.page?.preview || state.page?.vibe?.appliedDraft || {};
+
+    return {
+      html: compactPreviewText(root?.outerHTML || preview.html || "", 100000),
+      css: compactPreviewText(preview.css || "", 100000),
+      js: compactPreviewText(preview.js || "", 30000),
+      breakpointOverrides: preview.breakpointOverrides || {},
+    };
+  }
+
+  function describeScopedElement(element) {
+    if (!element) {
+      return "";
+    }
+
+    const tag = element.tagName ? element.tagName.toLowerCase() : "element";
+    const className = typeof element.className === "string" ? element.className.trim().replace(/\s+/g, ".") : "";
+    const text = element.textContent ? element.textContent.replace(/\s+/g, " ").trim().slice(0, 80) : "";
+    return [className ? `${tag}.${className}` : tag, text ? `"${text}"` : ""].filter(Boolean).join(" ");
+  }
+
+  function buildScopedVibeTarget() {
+    const element = getSelectedPreviewElement();
+
+    if (!element) {
+      return null;
+    }
+
+    return {
+      type: "selected-layer",
+      layerPath: getPreviewLayerPathForElement(element),
+      label: describeScopedElement(element),
+      html: compactPreviewText(element.outerHTML || "", 70000),
+      text: compactPreviewText(element.textContent || "", 4000),
+      childCount: element.querySelectorAll ? element.querySelectorAll("*").length : 0,
+      currentPreview: buildCurrentPreviewSnapshot(),
+    };
+  }
+
   async function checkLocalBridge(force = false) {
     if (state.localBridge.checking || (!force && state.localBridge.checked)) {
       return;
@@ -1059,6 +1157,7 @@
   }
 
   async function persistGeneratedDraft(generated) {
+    const scope = buildScopedVibeTarget();
     const response = await fetch(PROJECTS_API, {
       method: "POST",
       credentials: "include",
@@ -1073,6 +1172,7 @@
         prompt: state.prompt,
         includeProjectContext: state.includeProjectContext,
         includePageContext: state.includePageContext,
+        scope,
         generated,
       }),
     });
@@ -1368,6 +1468,7 @@
   }
 
   async function generateDraftViaLocalBridge() {
+    const scope = buildScopedVibeTarget();
     const response = await fetch(`${state.localBridge.url}/v1/generate-page`, {
       method: "POST",
       headers: {
@@ -1381,6 +1482,7 @@
         prompt: state.prompt,
         includeProjectContext: state.includeProjectContext,
         includePageContext: state.includePageContext,
+        scope,
       }),
     });
     const payload = await response.json().catch(() => ({}));
@@ -1431,6 +1533,7 @@
           prompt: state.prompt,
           includeProjectContext: state.includeProjectContext,
           includePageContext: state.includePageContext,
+          scope: buildScopedVibeTarget(),
         }),
       });
       const payload = await response.json().catch(() => ({}));

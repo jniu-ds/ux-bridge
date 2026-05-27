@@ -390,8 +390,34 @@ function buildCodexSystemPrompt() {
     "Put interaction code in the js field for preview.js. The js runs after HTML mounts as new Function(\"root\", \"page\", \"project\", \"api\", js).",
     "Use root.querySelector/querySelectorAll to attach scoped event listeners, manage local state in closure variables, and return a cleanup function when listeners or timers are created.",
     "Do not use imports, exports, network requests, document.write, inline handlers, or selectors outside root.",
+    "When a selected layer scope is provided, preserve the existing preview and edit only the selected layer and its descendants, plus any directly necessary scoped CSS or JS.",
+    "For scoped edits, still return the full page JSON contract, but do not rewrite unrelated markup, text, layout, styles, or interactions outside the target subtree.",
     "Keep the output polished, intentional, and mobile-first.",
   ].join(" ");
+}
+
+function compactCodexPreviewForPrompt(preview = {}) {
+  if (!preview || typeof preview !== "object") {
+    return null;
+  }
+
+  const html = String(preview.html || "");
+  const css = String(preview.css || "");
+  const js = String(preview.js || "");
+
+  if (!html && !css && !js) {
+    return null;
+  }
+
+  return {
+    html: html.slice(0, 100000),
+    css: css.slice(0, 100000),
+    js: js.slice(0, 30000),
+    breakpointOverrides: preview.breakpointOverrides && typeof preview.breakpointOverrides === "object" ? preview.breakpointOverrides : {},
+    htmlTruncated: html.length > 100000,
+    cssTruncated: css.length > 100000,
+    jsTruncated: js.length > 30000,
+  };
 }
 
 function buildFigmaImportSystemPrompt() {
@@ -423,7 +449,11 @@ function buildCodexUserPrompt({
   pageName,
   includeProjectContext,
   includePageContext,
+  scope = null,
+  currentPreview = null,
 }) {
+  const previewContext = compactCodexPreviewForPrompt(scope?.currentPreview || currentPreview);
+  const scopedEdit = scope?.type === "selected-layer" && scope.layerPath;
   const contextLines = [
     `Project: ${projectName}`,
     `Page: ${pageName}`,
@@ -431,14 +461,31 @@ function buildCodexUserPrompt({
     includePageContext ? `Include page context: yes` : `Include page context: no`,
     `User prompt: ${String(prompt || "").trim()}`,
   ];
+  const scopeLines = scopedEdit
+    ? [
+        "Selected layer scope: yes",
+        `Target layer path: ${scope.layerPath}`,
+        `Target layer label: ${scope.label || "selected layer"}`,
+        `Target child count: ${Number(scope.childCount) || 0}`,
+        `Target current HTML subtree: ${String(scope.html || "").slice(0, 70000)}`,
+        "Scope rule: edit only this selected layer and its children. Preserve every unrelated layer outside this subtree.",
+        "Return the complete page html/css/js so UX Bridge can save a normal draft, but keep unrelated page code unchanged.",
+      ]
+    : ["Selected layer scope: no", "Apply the prompt to the whole .vibe-generated-page preview."];
 
   return [
-    "Create a page-scoped mobile UI concept for the current UX Bridge page.",
+    scopedEdit
+      ? "Modify the current UX Bridge page as a scoped edit to the selected layer only."
+      : "Create or modify a page-scoped mobile UI concept for the current UX Bridge page.",
     contextLines.join("\n"),
+    scopeLines.join("\n"),
+    previewContext ? `Current full preview JSON: ${JSON.stringify(previewContext)}` : "",
     "Return JSON with keys: summary, html, css, js, assets.",
     "Use js for rich interactions such as toggles, filters, accordions, tab states, sliders, counters, or lightweight animation behavior.",
     "assets should be an empty array unless you truly need named assets.",
-  ].join("\n\n");
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 function buildFigmaImportUserText({ prompt, projectName, pageName, figmaImport }) {
@@ -868,6 +915,8 @@ async function generateCodexPageResult({
   includePageContext,
   providerAuth = {},
   figmaImport = null,
+  scope = null,
+  currentPreview = null,
 }) {
   const apiKey = String(providerAuth?.apiKey || "").trim();
 
@@ -919,6 +968,8 @@ async function generateCodexPageResult({
           pageName,
           includeProjectContext,
           includePageContext,
+          scope,
+          currentPreview,
         }),
     reasoning: {
       effort: "low",
@@ -969,6 +1020,8 @@ export async function generateVibePageResult({
   includeProjectContext,
   includePageContext,
   providerAuth,
+  scope = null,
+  currentPreview = null,
 }) {
   const provider = PROVIDERS.find((entry) => entry.id === providerId) || PROVIDERS[0];
 
@@ -980,6 +1033,8 @@ export async function generateVibePageResult({
       includeProjectContext,
       includePageContext,
       providerAuth,
+      scope,
+      currentPreview,
     });
   }
 

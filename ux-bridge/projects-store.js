@@ -602,6 +602,174 @@ function normalizeVibeDraft(draft) {
     assets: Array.isArray(draft.assets) ? draft.assets : [],
     credentialMode: String(draft.credentialMode || "user-session").trim().toLowerCase() || "user-session",
     breakpointOverrides: normalizePreviewBreakpointOverrides(draft.breakpointOverrides),
+    scope: normalizeVibeScope(draft.scope),
+  };
+}
+
+function limitVibeScopeText(value, maxLength) {
+  const text = String(value || "");
+  return text.length > maxLength ? text.slice(0, maxLength) : text;
+}
+
+function normalizeVibeScope(scope, { includeCurrentPreview = false } = {}) {
+  if (!scope || typeof scope !== "object") {
+    return null;
+  }
+
+  const type = String(scope.type || "").trim();
+  const layerPath = String(scope.layerPath || "").trim();
+
+  if (type !== "selected-layer" || !layerPath) {
+    return null;
+  }
+
+  const normalized = {
+    type,
+    layerPath,
+    label: limitVibeScopeText(scope.label, 240),
+    html: limitVibeScopeText(scope.html, 70000),
+    text: limitVibeScopeText(scope.text, 4000),
+    childCount: Number(scope.childCount) || 0,
+  };
+
+  if (includeCurrentPreview && scope.currentPreview && typeof scope.currentPreview === "object") {
+    normalized.currentPreview = normalizePagePreview({
+      html: limitVibeScopeText(scope.currentPreview.html, 100000),
+      css: limitVibeScopeText(scope.currentPreview.css, 100000),
+      js: limitVibeScopeText(scope.currentPreview.js, 30000),
+      breakpointOverrides: scope.currentPreview.breakpointOverrides,
+    });
+  }
+
+  return normalized;
+}
+
+const VIBE_SCOPE_VOID_TAGS = new Set([
+  "area",
+  "base",
+  "br",
+  "col",
+  "embed",
+  "hr",
+  "img",
+  "input",
+  "link",
+  "meta",
+  "param",
+  "source",
+  "track",
+  "wbr",
+]);
+
+function parseVibeScopeLayerPath(layerPath) {
+  return String(layerPath || "")
+    .split(".")
+    .map((segment) => Number(segment))
+    .filter((segment) => Number.isInteger(segment) && segment >= 0);
+}
+
+function areVibeScopePathsEqual(left, right) {
+  return left.length === right.length && left.every((segment, index) => segment === right[index]);
+}
+
+function findHtmlElementRangeByLayerPath(html, layerPath) {
+  const source = String(html || "");
+  const requestedPath = parseVibeScopeLayerPath(layerPath);
+
+  if (!source || !requestedPath.length) {
+    return null;
+  }
+
+  const candidatePaths = [requestedPath];
+
+  if (requestedPath[0] === 0 && requestedPath.length > 1) {
+    candidatePaths.push(requestedPath.slice(1));
+  }
+
+  const matchesCandidatePath = (path) => candidatePaths.some((candidatePath) => areVibeScopePathsEqual(path, candidatePath));
+  const tagPattern = /<\/?([a-zA-Z][\w:-]*)(?:\s[^<>]*)?>/g;
+  const stack = [{ tag: "", path: [], childCount: 0, start: 0 }];
+  let match;
+
+  while ((match = tagPattern.exec(source))) {
+    const token = match[0];
+
+    if (token.startsWith("</")) {
+      const closingTag = String(match[1] || "").toLowerCase();
+
+      for (let index = stack.length - 1; index > 0; index -= 1) {
+        const node = stack.pop();
+
+        if (matchesCandidatePath(node.path)) {
+          return {
+            start: node.start,
+            end: tagPattern.lastIndex,
+          };
+        }
+
+        if (node.tag === closingTag) {
+          break;
+        }
+      }
+
+      continue;
+    }
+
+    if (token.startsWith("<!") || token.startsWith("<?")) {
+      continue;
+    }
+
+    const tag = String(match[1] || "").toLowerCase();
+    const parent = stack[stack.length - 1];
+    const childIndex = parent.childCount;
+    parent.childCount += 1;
+    const path = [...parent.path, childIndex];
+    const selfClosing = /\/\s*>$/.test(token) || VIBE_SCOPE_VOID_TAGS.has(tag);
+
+    if (matchesCandidatePath(path) && selfClosing) {
+      return {
+        start: match.index,
+        end: tagPattern.lastIndex,
+      };
+    }
+
+    if (!selfClosing) {
+      stack.push({
+        tag,
+        path,
+        childCount: 0,
+        start: match.index,
+      });
+    }
+  }
+
+  return null;
+}
+
+function mergeGeneratedVibeScope(generated, scope) {
+  const normalizedScope = normalizeVibeScope(scope, { includeCurrentPreview: true });
+  const basePreview = normalizedScope?.currentPreview;
+
+  if (!generated || !normalizedScope?.layerPath || !basePreview?.html || !generated.html) {
+    return generated;
+  }
+
+  const baseRange = findHtmlElementRangeByLayerPath(basePreview.html, normalizedScope.layerPath);
+  const generatedRange = findHtmlElementRangeByLayerPath(generated.html, normalizedScope.layerPath);
+
+  if (!baseRange || !generatedRange) {
+    return generated;
+  }
+
+  const generatedSubtree = String(generated.html).slice(generatedRange.start, generatedRange.end);
+  const html = `${String(basePreview.html).slice(0, baseRange.start)}${generatedSubtree}${String(basePreview.html).slice(baseRange.end)}`;
+
+  return {
+    ...generated,
+    html,
+    css: generated.css || basePreview.css || "",
+    js: generated.js || basePreview.js || "",
+    breakpointOverrides: generated.breakpointOverrides || basePreview.breakpointOverrides || {},
   };
 }
 
@@ -2680,6 +2848,7 @@ export async function handleProjectsRequest(req) {
     const prompt = String(payload.prompt || "").trim();
     const includeProjectContext = payload.includeProjectContext !== false;
     const includePageContext = payload.includePageContext !== false;
+    const scope = normalizeVibeScope(payload.scope, { includeCurrentPreview: true });
 
     if (!projectId || !pageId) {
       return {
@@ -2741,6 +2910,8 @@ export async function handleProjectsRequest(req) {
         pageName: page.name,
         includeProjectContext,
         includePageContext,
+        scope,
+        currentPreview: scope?.currentPreview || buildPagePreview(page),
         currentUser: {
           email: user.email,
           fullName: user.fullName,
@@ -2758,6 +2929,8 @@ export async function handleProjectsRequest(req) {
       };
     }
 
+    generated = mergeGeneratedVibeScope(generated, scope);
+
     const nextDraft = {
       providerId,
       providerLabel: generated.providerLabel,
@@ -2768,6 +2941,7 @@ export async function handleProjectsRequest(req) {
       generatedAt,
       assets: generated.assets,
       credentialMode: generated.credentialMode,
+      scope: normalizeVibeScope(scope),
     };
     const currentVibe = normalizeVibeState(page.vibe);
 
@@ -2804,6 +2978,7 @@ export async function handleProjectsRequest(req) {
           providerId,
           providerLabel: generated.providerLabel,
           assets: generated.assets,
+          scope: normalizeVibeScope(scope),
         },
       },
     ]);
@@ -2991,6 +3166,7 @@ export async function handleProjectsRequest(req) {
     const prompt = String(payload.prompt || "").trim();
     const includeProjectContext = payload.includeProjectContext !== false;
     const includePageContext = payload.includePageContext !== false;
+    const scope = normalizeVibeScope(payload.scope || payload.generated?.scope);
 
     if (!projectId || !pageId) {
       return {
@@ -3050,6 +3226,11 @@ export async function handleProjectsRequest(req) {
       };
     }
 
+    generated = mergeGeneratedVibeScope(generated, {
+      ...scope,
+      currentPreview: buildPagePreview(page),
+    });
+
     const generatedAt = Number(payload.generated?.generatedAt) || Date.now();
     const nextDraft = {
       providerId: generated.providerId,
@@ -3061,6 +3242,7 @@ export async function handleProjectsRequest(req) {
       generatedAt,
       assets: generated.assets,
       credentialMode: generated.credentialMode,
+      scope,
     };
     const currentVibe = normalizeVibeState(page.vibe);
 
@@ -3097,6 +3279,7 @@ export async function handleProjectsRequest(req) {
           providerId: generated.providerId,
           providerLabel: generated.providerLabel,
           assets: generated.assets,
+          scope,
         },
       },
     ]);
