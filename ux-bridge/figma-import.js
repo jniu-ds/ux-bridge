@@ -200,6 +200,9 @@ function collectImagePaints(node, imageRefs = new Map()) {
         id: node.id,
         name: node.name,
         type: node.type,
+        childCount: Array.isArray(node.children) ? node.children.length : 0,
+        hasTextDescendant: hasTextDescendant(node),
+        box: compactBox(node.absoluteBoundingBox),
       });
       imageRefs.set(paint.imageRef, existing);
     });
@@ -449,7 +452,7 @@ function buildAssetReferences(imageFillEntries, imageFillPayload = {}, nodeExpor
     asset.nodes.slice(0, 4).forEach((node) => {
       const nodeExportUrl = String(nodeExportUrls[node.id] || "").trim();
 
-      if (!nodeExportUrl) {
+      if (!nodeExportUrl || node.hasTextDescendant) {
         return;
       }
 
@@ -458,6 +461,9 @@ function buildAssetReferences(imageFillEntries, imageFillPayload = {}, nodeExpor
         nodeId: node.id,
         name: node.name,
         type: node.type,
+        childCount: node.childCount,
+        hasTextDescendant: node.hasTextDescendant,
+        box: node.box,
         sourceImageRef: asset.imageRef,
         url: nodeExportUrl,
       });
