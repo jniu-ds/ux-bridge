@@ -9,6 +9,7 @@
   const FIGMA_API = "/api/figma";
   const MODAL_ID = "ux-figma-import-modal";
   const STYLE_ID = "ux-figma-import-styles";
+  const pendingImports = new Map();
   const state = {
     open: false,
     loading: false,
@@ -178,6 +179,72 @@
         color: #64748b;
         padding: 0 4px;
       }
+
+      .figma-import-preview-loading {
+        display: grid;
+        place-items: center;
+        min-height: 100%;
+        padding: 32px;
+        box-sizing: border-box;
+        color: #111827;
+        font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      .figma-import-preview-loading__card {
+        display: grid;
+        justify-items: center;
+        gap: 12px;
+        width: min(320px, calc(100% - 32px));
+        padding: 28px;
+        border: 1px solid rgba(148, 163, 184, 0.28);
+        border-radius: 24px;
+        background: rgba(255, 255, 255, 0.92);
+        box-shadow: 0 18px 48px rgba(15, 23, 42, 0.12);
+        text-align: center;
+      }
+
+      .figma-import-preview-loading__spinner {
+        width: 38px;
+        height: 38px;
+        border: 3px solid rgba(164, 41, 236, 0.18);
+        border-top-color: #a429ec;
+        border-radius: 999px;
+        animation: figma-import-spin 800ms linear infinite;
+      }
+
+      .figma-import-preview-loading__title {
+        margin: 0;
+        color: #111827;
+        font-size: 16px;
+        font-weight: 800;
+        line-height: 1.2;
+      }
+
+      .figma-import-preview-loading__copy {
+        margin: 0;
+        color: #64748b;
+        font-size: 13px;
+        font-weight: 600;
+        line-height: 1.45;
+      }
+
+      .figma-import-preview-loading__retry {
+        min-height: 38px;
+        margin-top: 4px;
+        border: 0;
+        border-radius: 999px;
+        padding: 0 16px;
+        background: #252525;
+        color: #ffffff;
+        font: 800 13px/1 Inter, system-ui, sans-serif;
+        cursor: pointer;
+      }
+
+      @keyframes figma-import-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
     `;
     document.head.append(style);
   }
@@ -204,6 +271,103 @@
     state.error = "";
     renderModal();
     void checkFigmaConnection();
+  }
+
+  function makeImportJobKey(projectId, pageId) {
+    return `${projectId}::${pageId}`;
+  }
+
+  function rememberPendingImport(job) {
+    const key = makeImportJobKey(job.projectId, job.pageId);
+    pendingImports.set(key, job);
+  }
+
+  function forgetPendingImport(projectId, pageId) {
+    const key = makeImportJobKey(projectId, pageId);
+    pendingImports.delete(key);
+  }
+
+  function getPendingImport(projectId, pageId) {
+    const key = makeImportJobKey(projectId, pageId);
+    return pendingImports.get(key) || null;
+  }
+
+  function getCurrentPendingImport() {
+    const { projectId, pageId } = getProjectAndPageIds();
+    if (!projectId || !pageId) {
+      return null;
+    }
+    return getPendingImport(projectId, pageId);
+  }
+
+  function getPreviewElements() {
+    return {
+      emptyShell: document.querySelector("[data-empty-mobile-shell]"),
+      stage: document.querySelector("[data-vibe-mobile-stage]"),
+      render: document.querySelector("[data-vibe-mobile-render]"),
+    };
+  }
+
+  function setPreviewImportLoading(job) {
+    const { emptyShell, stage, render } = getPreviewElements();
+    if (!(stage instanceof HTMLElement) || !(render instanceof HTMLElement)) {
+      return;
+    }
+
+    ensureStyles();
+    const jobKey = makeImportJobKey(job.projectId, job.pageId);
+    if (render.dataset.figmaImportJobKey === jobKey && render.querySelector("[data-figma-import-preview-loading]")) {
+      return;
+    }
+    if (emptyShell instanceof HTMLElement) {
+      emptyShell.hidden = true;
+    }
+    stage.hidden = false;
+    render.innerHTML = `
+      <div class="figma-import-preview-loading" data-figma-import-preview-loading>
+        <div class="figma-import-preview-loading__card">
+          <div class="figma-import-preview-loading__spinner" aria-hidden="true"></div>
+          <p class="figma-import-preview-loading__title">Importing from Figma</p>
+          <p class="figma-import-preview-loading__copy">You can keep working while this page updates in the background.</p>
+        </div>
+      </div>
+    `;
+    render.dataset.figmaImportJobKey = jobKey;
+  }
+
+  function setPreviewImportError(job, message) {
+    const { emptyShell, stage, render } = getPreviewElements();
+    if (!(stage instanceof HTMLElement) || !(render instanceof HTMLElement)) {
+      return;
+    }
+
+    ensureStyles();
+    if (emptyShell instanceof HTMLElement) {
+      emptyShell.hidden = true;
+    }
+    stage.hidden = false;
+    render.innerHTML = `
+      <div class="figma-import-preview-loading" data-figma-import-preview-loading>
+        <div class="figma-import-preview-loading__card">
+          <p class="figma-import-preview-loading__title">Figma import failed</p>
+          <p class="figma-import-preview-loading__copy">${escapeHtml(message)}</p>
+          <button type="button" class="figma-import-preview-loading__retry" data-figma-import-retry>Try again</button>
+        </div>
+      </div>
+    `;
+    render.dataset.figmaImportJobKey = makeImportJobKey(job.projectId, job.pageId);
+    render.querySelector("[data-figma-import-retry]")?.addEventListener("click", () => {
+      state.url = job.figmaUrl || state.url;
+      openModal();
+    });
+  }
+
+  function syncCurrentPreviewImportLoading() {
+    const job = getCurrentPendingImport();
+    if (!job) {
+      return;
+    }
+    setPreviewImportLoading(job);
   }
 
   async function checkFigmaConnection() {
@@ -334,7 +498,7 @@
     return escapeHtml(value).replaceAll("\n", " ");
   }
 
-  async function submitImport() {
+  function submitImport() {
     const figmaUrl = String(state.url || "").trim();
     const { projectId, pageId } = getProjectAndPageIds();
 
@@ -350,10 +514,26 @@
       return;
     }
 
-    state.loading = true;
-    state.error = "";
-    renderModal();
+    const existingJob = getPendingImport(projectId, pageId);
+    if (existingJob) {
+      closeModal();
+      setPreviewImportLoading(existingJob);
+      return;
+    }
 
+    const job = {
+      projectId,
+      pageId,
+      figmaUrl,
+      startedAt: Date.now(),
+    };
+    rememberPendingImport(job);
+    closeModal();
+    setPreviewImportLoading(job);
+    void runImportInBackground(job);
+  }
+
+  async function runImportInBackground(job) {
     try {
       const response = await fetch(PROJECTS_API, {
         method: "POST",
@@ -363,9 +543,9 @@
         },
         body: JSON.stringify({
           action: "importFigmaContent",
-          project: projectId,
-          page: pageId,
-          figmaUrl,
+          project: job.projectId,
+          page: job.pageId,
+          figmaUrl: job.figmaUrl,
         }),
       });
       const payload = await response.json().catch(() => ({}));
@@ -378,16 +558,19 @@
         throw new Error(payload?.error || "Unable to import that Figma design.");
       }
 
-      closeModal();
+      forgetPendingImport(job.projectId, job.pageId);
       window.dispatchEvent(
         new CustomEvent("uxbridge:project-runtime-sync", {
           detail: { project: payload.project },
         }),
       );
     } catch (error) {
-      state.loading = false;
-      state.error = error instanceof Error ? error.message : "Unable to import that Figma design.";
-      renderModal();
+      forgetPendingImport(job.projectId, job.pageId);
+      const message = error instanceof Error ? error.message : "Unable to import that Figma design.";
+      const { projectId, pageId } = getProjectAndPageIds();
+      if (projectId === job.projectId && pageId === job.pageId) {
+        setPreviewImportError(job, message);
+      }
     }
   }
 
@@ -533,7 +716,15 @@
         }
       });
     });
+    syncCurrentPreviewImportLoading();
   });
 
   observer.observe(document.documentElement, { childList: true, subtree: true });
+  window.addEventListener("uxbridge:project-page-sync", () => {
+    window.requestAnimationFrame(syncCurrentPreviewImportLoading);
+  });
+  window.addEventListener("popstate", () => {
+    window.requestAnimationFrame(syncCurrentPreviewImportLoading);
+  });
+  syncCurrentPreviewImportLoading();
 })();
