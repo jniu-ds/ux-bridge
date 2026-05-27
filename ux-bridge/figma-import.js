@@ -1,8 +1,8 @@
 const FIGMA_API_BASE_URL = "https://api.figma.com/v1";
 const MAX_FIGMA_TREE_NODES = 220;
 const MAX_FIGMA_TREE_DEPTH = 10;
-const MAX_FIGMA_ASSETS = 40;
-const MAX_FIGMA_VECTOR_ASSETS = 32;
+const MAX_FIGMA_ASSETS = 80;
+const MAX_FIGMA_VECTOR_ASSETS = 64;
 const VECTOR_ASSET_TYPES = new Set([
   "BOOLEAN_OPERATION",
   "ELLIPSE",
@@ -249,12 +249,15 @@ function isLikelyVectorAssetNode(node = {}) {
   const width = typeof box.width === "number" ? box.width : 0;
   const height = typeof box.height === "number" ? box.height : 0;
 
-  if (!width || !height || width > 256 || height > 256) {
+  if (!width || !height || width > 768 || height > 768) {
     return false;
   }
 
   const name = String(node.name || "").toLowerCase();
   const isNamedLikeIcon = /\b(icon|svg|glyph|symbol|logo|mark|chevron|arrow|menu|nav|tab|battery|wifi|signal|home|scan|learn|shop|history|close|share|upload|x)\b/.test(
+    name,
+  );
+  const isNamedLikeComplexVector = /\b(gauge|ring|arc|circle|dial|score|scale|progress|meter|chart|graph|spark|constellation|fingerprint|symbol|indicator|radial)\b/.test(
     name,
   );
   const hasExplicitSvgExport = Array.isArray(node.exportSettings)
@@ -265,12 +268,12 @@ function isLikelyVectorAssetNode(node = {}) {
     return false;
   }
 
-  if (VECTOR_ASSET_TYPES.has(node.type)) {
+  if (VECTOR_ASSET_TYPES.has(node.type) && (width <= 256 || height <= 256 || isNamedLikeComplexVector || hasExplicitSvgExport)) {
     return true;
   }
 
   if (VECTOR_CONTAINER_TYPES.has(node.type)) {
-    return isNamedLikeIcon || hasExplicitSvgExport;
+    return isNamedLikeIcon || isNamedLikeComplexVector || hasExplicitSvgExport;
   }
 
   return false;
@@ -490,6 +493,59 @@ function buildAssetReferences(imageFillEntries, imageFillPayload = {}, nodeExpor
   ].slice(0, MAX_FIGMA_ASSETS);
 }
 
+function buildFigmaAssetPlan(nodeDocument, assets = []) {
+  const imageFillAssets = assets.filter((asset) => asset.kind === "image-fill");
+  const renderedNodeAssets = assets.filter((asset) => asset.kind === "rendered-node");
+  const svgIconAssets = assets.filter((asset) => asset.kind === "svg-icon");
+  const rootBox = compactBox(nodeDocument?.absoluteBoundingBox) || {};
+
+  return {
+    nativeFrame: {
+      id: nodeDocument?.id,
+      name: nodeDocument?.name,
+      type: nodeDocument?.type,
+      width: rootBox.width,
+      height: rootBox.height,
+      instruction:
+        "At this exact width, position the generated preview from the Figma node's top-left origin and match the screenshot before adding wider/narrower responsive rules.",
+    },
+    backgroundImages: imageFillAssets.slice(0, 24).map((asset) => ({
+      imageRef: asset.imageRef,
+      url: asset.url,
+      scaleMode: asset.scaleMode,
+      nodes: (asset.nodes || []).slice(0, 6).map((node) => ({
+        id: node.id,
+        name: node.name,
+        type: node.type,
+        childCount: node.childCount,
+        hasTextDescendant: node.hasTextDescendant,
+        box: node.box,
+        usage: node.hasTextDescendant || node.childCount
+          ? "Use this image as that node's background/fill only, then recreate editable child text and controls once."
+          : "Use this image as the node's visual content.",
+      })),
+    })),
+    atomicRenderedImages: renderedNodeAssets.slice(0, 18).map((asset) => ({
+      nodeId: asset.nodeId,
+      name: asset.name,
+      type: asset.type,
+      url: asset.url,
+      box: asset.box,
+      instruction:
+        "Render this exported node once as an img/background and do not recreate this same visual from child shapes.",
+    })),
+    svgVectors: svgIconAssets.slice(0, 36).map((asset) => ({
+      nodeId: asset.nodeId,
+      name: asset.name,
+      type: asset.type,
+      url: asset.url,
+      box: asset.box,
+      instruction:
+        "Use this SVG asset exactly for icons, rings, gauges, arcs, logos, and vector artwork. Do not approximate it with CSS doodles.",
+    })),
+  };
+}
+
 export function parseFigmaNodeUrl(value) {
   let url;
 
@@ -642,6 +698,7 @@ export async function fetchFigmaImportContext(figmaUrl, options = {}) {
     height: typeof box.height === "number" ? box.height : 0,
     imageUrl: String(imagePayload?.images?.[target.nodeId] || "").trim(),
     nodeTree: summarizeNode(nodeDocument, 0, { count: 0 }, null, assetContext),
+    assetPlan: buildFigmaAssetPlan(nodeDocument, assets),
     assets,
     components: nodePayload?.components || undefined,
     componentSets: nodePayload?.componentSets || undefined,
