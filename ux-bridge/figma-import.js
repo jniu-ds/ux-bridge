@@ -5,21 +5,14 @@ const MAX_FIGMA_ASSETS = 40;
 const MAX_FIGMA_VECTOR_ASSETS = 32;
 const VECTOR_ASSET_TYPES = new Set([
   "BOOLEAN_OPERATION",
-  "COMPONENT",
-  "COMPONENT_SET",
   "ELLIPSE",
-  "FRAME",
-  "GROUP",
-  "INSTANCE",
   "LINE",
   "POLYGON",
-  "RECTANGLE",
   "REGULAR_POLYGON",
-  "SECTION",
-  "SLICE",
   "STAR",
   "VECTOR",
 ]);
+const VECTOR_CONTAINER_TYPES = new Set(["COMPONENT", "GROUP", "INSTANCE"]);
 
 function readFigmaAccessToken(explicitToken = "") {
   return String(
@@ -223,8 +216,29 @@ function getImageFillEntries(nodeDocument) {
   return Array.from(collectImagePaints(nodeDocument).values()).slice(0, MAX_FIGMA_ASSETS);
 }
 
+function hasTextDescendant(node = {}) {
+  if (!node || typeof node !== "object") {
+    return false;
+  }
+
+  if (node.type === "TEXT") {
+    return true;
+  }
+
+  return Array.isArray(node.children) ? node.children.some((child) => hasTextDescendant(child)) : false;
+}
+
+function hasImagePaint(node = {}) {
+  if (!node || typeof node !== "object") {
+    return false;
+  }
+
+  const paintLists = [node.fills, node.strokes].filter(Array.isArray);
+  return paintLists.some((paints) => paints.some((paint) => paint?.type === "IMAGE" && paint?.visible !== false));
+}
+
 function isLikelyVectorAssetNode(node = {}) {
-  if (!node || typeof node !== "object" || node.visible === false || !VECTOR_ASSET_TYPES.has(node.type)) {
+  if (!node || typeof node !== "object" || node.visible === false) {
     return false;
   }
 
@@ -237,17 +251,26 @@ function isLikelyVectorAssetNode(node = {}) {
   }
 
   const name = String(node.name || "").toLowerCase();
-  const hasVectorType = ["VECTOR", "BOOLEAN_OPERATION", "ELLIPSE", "LINE", "POLYGON", "REGULAR_POLYGON", "STAR"].includes(
-    node.type,
-  );
-  const isNamedLikeIcon = /\b(icon|svg|glyph|symbol|logo|mark|chevron|arrow|menu|nav|tab|battery|wifi|signal|home|scan|learn|shop|history)\b/.test(
+  const isNamedLikeIcon = /\b(icon|svg|glyph|symbol|logo|mark|chevron|arrow|menu|nav|tab|battery|wifi|signal|home|scan|learn|shop|history|close|share|upload|x)\b/.test(
     name,
   );
   const hasExplicitSvgExport = Array.isArray(node.exportSettings)
     ? node.exportSettings.some((setting) => String(setting?.format || "").toUpperCase() === "SVG")
     : false;
 
-  return hasVectorType || isNamedLikeIcon || hasExplicitSvgExport;
+  if (hasTextDescendant(node) || hasImagePaint(node)) {
+    return false;
+  }
+
+  if (VECTOR_ASSET_TYPES.has(node.type)) {
+    return true;
+  }
+
+  if (VECTOR_CONTAINER_TYPES.has(node.type)) {
+    return isNamedLikeIcon || hasExplicitSvgExport;
+  }
+
+  return false;
 }
 
 function collectVectorAssetNodes(node, vectorNodes = []) {
