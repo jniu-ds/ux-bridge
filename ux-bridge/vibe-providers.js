@@ -465,7 +465,8 @@ function buildFigmaImportUserText({ prompt, projectName, pageName, figmaImport }
     "At the Figma node's native width, match the screenshot as closely as possible: hierarchy, alignment, typography, colors, border radii, shadows, spacing, and proportions. First produce an exact native-width match, then add responsive rules.",
     "Use the assetPlan as binding instructions. It identifies background image fills, atomic rendered images, and SVG vectors that must be used instead of guessed CSS approximations.",
     "The generated root's top-left content should map to the Figma node's top-left origin. Do not insert an extra narrow centered wrapper unless such a wrapper exists in Figma. The primary visual surface should fill the imported frame width at the native breakpoint.",
-    "The metadata assets array contains exported Figma image fills, rendered image nodes, and SVG vector/icon exports. Use those asset URLs directly in img tags or CSS background-image declarations whenever the Figma node has pictures, photos, illustrations, logos, image background fills, or SVG icons.",
+    "The metadata assets array contains exported Figma image fills, rendered image nodes, and SVG vector/icon exports. Do not use <img> tags. Render image and SVG asset URLs as CSS background-image values on sized <div> elements that match the target Figma layer bounds.",
+    "Every image asset should be represented by a div with explicit sizing/aspect-ratio and background-size/background-position/background-repeat that matches the Figma crop/fit behavior. Use role=\"img\" and aria-label when the asset needs alternative text.",
     "Prefer assets with kind=\"rendered-node\" for cropped/masked/background image layers because they preserve Figma crop, mask, radius, and effects. Use kind=\"image-fill\" when you need the original source image.",
     "When an image fill belongs to a container that also has text or child elements, use the image-fill URL as the container background and recreate the child elements separately. Do not use a rendered-node export that already includes those children.",
     "Use assets with kind=\"svg-icon\" for vector icons, logos, status symbols, rings, gauges, arcs, charts, progress indicators, and tab/navigation glyphs. Do not redraw SVG/vector artwork with plain boxes, emoji, generic CSS shapes, or scribbled strokes when a matching SVG asset URL exists.",
@@ -566,7 +567,7 @@ function describeCodexError(status, rawMessage = "") {
 }
 
 function validateGeneratedHtml(html) {
-  const trimmed = String(html || "").trim();
+  const trimmed = normalizeGeneratedImageTags(String(html || "").trim());
 
   if (!trimmed) {
     throw new Error("Codex returned empty HTML.");
@@ -581,6 +582,81 @@ function validateGeneratedHtml(html) {
   }
 
   return trimmed;
+}
+
+function parseGeneratedHtmlAttributes(attributeSource = "") {
+  const attrs = {};
+  const pattern = /([^\s"'<>/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g;
+  let match;
+
+  while ((match = pattern.exec(attributeSource))) {
+    const name = String(match[1] || "").trim();
+
+    if (!name) {
+      continue;
+    }
+
+    attrs[name] = match[2] ?? match[3] ?? match[4] ?? "";
+  }
+
+  return attrs;
+}
+
+function escapeGeneratedHtmlAttribute(value = "") {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function serializeGeneratedHtmlAttributes(attrs = {}) {
+  return Object.entries(attrs)
+    .filter(([name, value]) => name && value !== undefined && value !== null && value !== false)
+    .map(([name, value]) => {
+      if (value === true || value === "") {
+        return name;
+      }
+
+      return `${name}="${escapeGeneratedHtmlAttribute(value)}"`;
+    })
+    .join(" ");
+}
+
+function toBackgroundImageStyle(src = "") {
+  const escapedUrl = String(src || "").replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+
+  return [
+    `background-image: url('${escapedUrl}')`,
+    "background-size: cover",
+    "background-position: center",
+    "background-repeat: no-repeat",
+  ].join("; ");
+}
+
+function normalizeGeneratedImageTags(html = "") {
+  return String(html || "").replace(/<img\b([^>]*)\/?>/gi, (_match, attributeSource = "") => {
+    const attrs = parseGeneratedHtmlAttributes(attributeSource);
+    const src = String(attrs.src || "").trim();
+    const alt = String(attrs.alt || "").trim();
+    const existingStyle = String(attrs.style || "").trim().replace(/;+\s*$/, "");
+    const backgroundStyle = src ? toBackgroundImageStyle(src) : "";
+    const style = [existingStyle, backgroundStyle].filter(Boolean).join("; ");
+
+    delete attrs.src;
+    delete attrs.alt;
+    attrs.role = attrs.role || "img";
+
+    if (alt && !attrs["aria-label"]) {
+      attrs["aria-label"] = alt;
+    }
+
+    if (style) {
+      attrs.style = style;
+    }
+
+    return `<div ${serializeGeneratedHtmlAttributes(attrs)}></div>`;
+  });
 }
 
 function validateGeneratedCss(css) {
@@ -722,6 +798,7 @@ function buildFigmaFastQaUserText({ projectName, pageName, figmaImport, firstPas
     "Return a corrected full page result only if it improves visual fidelity. Keep the same JSON contract.",
     "Focus on practical pixel-match issues: spacing, padding, margins, alignment, text wrapping, duplicated layers, asset sizing, image crop, icon placement, radii, shadows, and responsive behavior.",
     "If the generated preview uses a composite image that already contains text, controls, icons, or child elements and also recreates those same children in HTML, remove the composite usage and use the original image-fill as a background instead.",
+    "Do not return <img> tags. If an image or SVG asset is needed, render it as a sized div with CSS background-image so the preview can measure and select it consistently.",
     "If a photo/background image visible in the screenshot is missing, add the matching Figma image-fill or rendered-node asset before changing layout.",
     "If vector rings, gauges, icons, or charts are approximated with rough CSS strokes, replace the approximation with matching SVG asset URLs from the Figma metadata.",
     "If the generated preview is constrained into a narrow centered panel that does not exist in Figma, remove that wrapper and restore the native Figma frame width/origin.",
