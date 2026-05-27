@@ -88,7 +88,7 @@ function compactTransform(transform) {
     .map((row) => (Array.isArray(row) ? row.slice(0, 3).map((value) => roundNumber(value, 10000)) : row));
 }
 
-function compactPaint(paint = {}) {
+function compactPaint(paint = {}, assetContext = {}) {
   if (!paint || typeof paint !== "object" || paint.visible === false) {
     return null;
   }
@@ -111,6 +111,7 @@ function compactPaint(paint = {}) {
     return {
       ...base,
       imageRef: paint.imageRef,
+      url: assetContext.imageFillUrls?.get?.(paint.imageRef),
       scaleMode: paint.scaleMode,
       imageTransform: compactTransform(paint.imageTransform),
       scalingFactor: roundNumber(paint.scalingFactor),
@@ -200,7 +201,11 @@ function collectImagePaints(node, imageRefs = new Map()) {
   return imageRefs;
 }
 
-function summarizeNode(node, depth = 0, counter = { count: 0 }, rootBox = null) {
+function getImageFillEntries(nodeDocument) {
+  return Array.from(collectImagePaints(nodeDocument).values()).slice(0, MAX_FIGMA_ASSETS);
+}
+
+function summarizeNode(node, depth = 0, counter = { count: 0 }, rootBox = null, assetContext = {}) {
   if (!node || typeof node !== "object" || counter.count >= MAX_FIGMA_TREE_NODES || depth > MAX_FIGMA_TREE_DEPTH) {
     return null;
   }
@@ -225,6 +230,7 @@ function summarizeNode(node, depth = 0, counter = { count: 0 }, rootBox = null) 
     layoutGrow: roundNumber(node.layoutGrow),
     layoutSizingHorizontal: node.layoutSizingHorizontal,
     layoutSizingVertical: node.layoutSizingVertical,
+    renderedAssetUrl: assetContext.nodeExportUrls?.get?.(node.id),
   };
 
   if (node.type === "TEXT") {
@@ -249,8 +255,12 @@ function summarizeNode(node, depth = 0, counter = { count: 0 }, rootBox = null) 
     };
   }
 
-  const fills = Array.isArray(node.fills) ? node.fills.map(compactPaint).filter(Boolean).slice(0, 4) : [];
-  const strokes = Array.isArray(node.strokes) ? node.strokes.map(compactPaint).filter(Boolean).slice(0, 4) : [];
+  const fills = Array.isArray(node.fills)
+    ? node.fills.map((paint) => compactPaint(paint, assetContext)).filter(Boolean).slice(0, 4)
+    : [];
+  const strokes = Array.isArray(node.strokes)
+    ? node.strokes.map((paint) => compactPaint(paint, assetContext)).filter(Boolean).slice(0, 4)
+    : [];
 
   if (fills.length) {
     summary.fills = fills;
@@ -302,7 +312,7 @@ function summarizeNode(node, depth = 0, counter = { count: 0 }, rootBox = null) 
     const children = [];
 
     for (const child of node.children) {
-      const childSummary = summarizeNode(child, depth + 1, counter, currentRootBox);
+      const childSummary = summarizeNode(child, depth + 1, counter, currentRootBox, assetContext);
 
       if (childSummary) {
         children.push(childSummary);
@@ -321,20 +331,43 @@ function summarizeNode(node, depth = 0, counter = { count: 0 }, rootBox = null) 
   return summary;
 }
 
-function buildAssetReferences(nodeDocument, nodePayload) {
-  const imageRefs = collectImagePaints(nodeDocument);
-  const figmaImages = nodePayload?.meta?.images || {};
+function buildAssetReferences(imageFillEntries, imageFillPayload = {}, nodeExportPayload = {}) {
+  const imageFillUrls = imageFillPayload?.images || {};
+  const nodeExportUrls = nodeExportPayload?.images || {};
+  const assets = [];
 
-  return Array.from(imageRefs.values())
-    .slice(0, MAX_FIGMA_ASSETS)
-    .map((asset) => ({
-      kind: "image-fill",
-      imageRef: asset.imageRef,
-      url: String(figmaImages[asset.imageRef] || "").trim(),
-      scaleMode: asset.scaleMode,
-      nodes: asset.nodes.slice(0, 8),
-    }))
-    .filter((asset) => asset.url);
+  imageFillEntries.forEach((asset) => {
+    const imageFillUrl = String(imageFillUrls[asset.imageRef] || "").trim();
+
+    if (imageFillUrl) {
+      assets.push({
+        kind: "image-fill",
+        imageRef: asset.imageRef,
+        url: imageFillUrl,
+        scaleMode: asset.scaleMode,
+        nodes: asset.nodes.slice(0, 8),
+      });
+    }
+
+    asset.nodes.slice(0, 4).forEach((node) => {
+      const nodeExportUrl = String(nodeExportUrls[node.id] || "").trim();
+
+      if (!nodeExportUrl) {
+        return;
+      }
+
+      assets.push({
+        kind: "rendered-node",
+        nodeId: node.id,
+        name: node.name,
+        type: node.type,
+        sourceImageRef: asset.imageRef,
+        url: nodeExportUrl,
+      });
+    });
+  });
+
+  return assets.slice(0, MAX_FIGMA_ASSETS);
 }
 
 export function parseFigmaNodeUrl(value) {
@@ -393,12 +426,43 @@ export async function fetchFigmaImportContext(figmaUrl, options = {}) {
     throw new Error("Figma did not return a node for that URL.");
   }
 
+  const imageFillEntries = getImageFillEntries(nodeDocument);
+  const imageFillResponse = await fetch(`${FIGMA_API_BASE_URL}/files/${encodeURIComponent(target.fileKey)}/images`, {
+    headers,
+  });
+  const imageFillPayload = imageFillResponse.ok ? await imageFillResponse.json().catch(() => ({})) : {};
+  const imageFillNodeIds = Array.from(
+    new Set(imageFillEntries.flatMap((asset) => asset.nodes.map((node) => node.id)).filter(Boolean)),
+  ).slice(0, MAX_FIGMA_ASSETS);
+  let nodeExportPayload = {};
+
+  if (imageFillNodeIds.length) {
+    const nodeExportResponse = await fetch(
+      `${FIGMA_API_BASE_URL}/images/${encodeURIComponent(target.fileKey)}?ids=${encodeURIComponent(imageFillNodeIds.join(","))}&format=png&scale=2`,
+      { headers },
+    );
+    nodeExportPayload = nodeExportResponse.ok ? await nodeExportResponse.json().catch(() => ({})) : {};
+  }
+
   const imageResponse = await fetch(
     `${FIGMA_API_BASE_URL}/images/${encodeURIComponent(target.fileKey)}?ids=${encodeURIComponent(target.nodeId)}&format=png&scale=2`,
     { headers },
   );
   const imagePayload = imageResponse.ok ? await imageResponse.json().catch(() => ({})) : {};
   const box = nodeDocument.absoluteBoundingBox || {};
+  const assets = buildAssetReferences(imageFillEntries, imageFillPayload, nodeExportPayload);
+  const assetContext = {
+    imageFillUrls: new Map(
+      assets
+        .filter((asset) => asset.kind === "image-fill" && asset.imageRef && asset.url)
+        .map((asset) => [asset.imageRef, asset.url]),
+    ),
+    nodeExportUrls: new Map(
+      assets
+        .filter((asset) => asset.kind === "rendered-node" && asset.nodeId && asset.url)
+        .map((asset) => [asset.nodeId, asset.url]),
+    ),
+  };
 
   return {
     ...target,
@@ -407,8 +471,8 @@ export async function fetchFigmaImportContext(figmaUrl, options = {}) {
     width: typeof box.width === "number" ? box.width : 0,
     height: typeof box.height === "number" ? box.height : 0,
     imageUrl: String(imagePayload?.images?.[target.nodeId] || "").trim(),
-    nodeTree: summarizeNode(nodeDocument),
-    assets: buildAssetReferences(nodeDocument, nodePayload),
+    nodeTree: summarizeNode(nodeDocument, 0, { count: 0 }, null, assetContext),
+    assets,
     components: nodePayload?.components || undefined,
     componentSets: nodePayload?.componentSets || undefined,
     styles: nodePayload?.styles || undefined,
