@@ -469,7 +469,10 @@ function buildCodexUserPrompt({
         `Target child count: ${Number(scope.childCount) || 0}`,
         `Target current HTML subtree: ${String(scope.html || "").slice(0, 70000)}`,
         "Scope rule: edit only this selected layer and its children. Preserve every unrelated layer outside this subtree.",
+        "For scoped layout or spacing requests, preserve all existing child cards, text, metrics, labels, badges, and controls unless the user explicitly asks to remove them.",
+        "If the user asks to make existing elements bigger, roomier, wider, taller, or more breathable, prefer CSS spacing/sizing changes and keep the selected layer's child structure intact.",
         "Return html as the replacement markup for only this selected layer. Do not return .vibe-generated-page or unrelated page markup.",
+        "The replacement html must include the selected layer root element and every original child that still belongs in that selected layer.",
         "Return css/js only if this subtree needs a small additive patch. Leave css/js empty when the existing page code is enough.",
       ]
     : ["Selected layer scope: no", "Apply the prompt to the whole .vibe-generated-page preview."];

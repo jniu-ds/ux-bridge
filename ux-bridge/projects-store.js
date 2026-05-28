@@ -985,7 +985,47 @@ function getVibeScopedCssPatch(baseCss, generatedCss) {
   return generated;
 }
 
-function mergeGeneratedVibeScope(generated, scope, { requireScope = false } = {}) {
+function getVibeScopeTextTokens(html) {
+  return Array.from(
+    new Set(
+      String(html || "")
+        .replace(/<style[\s\S]*?<\/style>/gi, " ")
+        .replace(/<script[\s\S]*?<\/script>/gi, " ")
+        .replace(/<[^>]*>/g, " ")
+        .replace(/&[a-z0-9#]+;/gi, " ")
+        .toLowerCase()
+        .match(/[a-z0-9$%+.:-]{2,}/g) || [],
+    ),
+  );
+}
+
+function promptAllowsDestructiveScopeChange(prompt = "") {
+  return /\b(remove|delete|drop|clear|empty|hide|strip|replace all|rewrite|simplify|start over)\b/i.test(String(prompt || ""));
+}
+
+function assertVibeScopedReplacementIsSafe(baseSubtree, generatedSubtree, prompt = "") {
+  if (promptAllowsDestructiveScopeChange(prompt)) {
+    return;
+  }
+
+  const baseTokens = getVibeScopeTextTokens(baseSubtree);
+
+  if (baseTokens.length < 8) {
+    return;
+  }
+
+  const generatedTokens = new Set(getVibeScopeTextTokens(generatedSubtree));
+  const preservedCount = baseTokens.filter((token) => generatedTokens.has(token)).length;
+  const preservedRatio = preservedCount / baseTokens.length;
+  const baseLength = String(baseSubtree || "").length;
+  const generatedLength = String(generatedSubtree || "").length;
+
+  if (preservedRatio < 0.45 && generatedLength < baseLength * 0.7) {
+    throw new Error("The scoped Vibe response removed too much of the selected layer. Try the scoped prompt again.");
+  }
+}
+
+function mergeGeneratedVibeScope(generated, scope, { requireScope = false, prompt = "" } = {}) {
   const normalizedScope = normalizeVibeScope(scope, { includeCurrentPreview: true });
   const basePreview = normalizedScope?.currentPreview;
 
@@ -1024,6 +1064,9 @@ function mergeGeneratedVibeScope(generated, scope, { requireScope = false } = {}
     }
     return generated;
   }
+
+  const baseSubtree = String(basePreview.html).slice(baseRange.start, baseRange.end);
+  assertVibeScopedReplacementIsSafe(baseSubtree, generatedSubtree, prompt);
 
   const cssPatch = getVibeScopedCssPatch(basePreview.css, generated.css);
   const scopeClass = cssPatch ? createVibeScopeClass(normalizedScope.layerPath) : "";
@@ -3211,6 +3254,7 @@ export async function handleProjectsRequest(req) {
     try {
       generated = mergeGeneratedVibeScope(generated, scope ? { ...scope, currentPreview: currentPagePreview } : null, {
         requireScope: Boolean(scope),
+        prompt,
       });
     } catch (error) {
       return {
@@ -3520,6 +3564,7 @@ export async function handleProjectsRequest(req) {
     try {
       generated = mergeGeneratedVibeScope(generated, scope ? { ...scope, currentPreview: buildPagePreview(page) } : null, {
         requireScope: Boolean(scope),
+        prompt,
       });
     } catch (error) {
       return {
