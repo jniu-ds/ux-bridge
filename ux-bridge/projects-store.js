@@ -1003,6 +1003,20 @@ function promptAllowsDestructiveScopeChange(prompt = "") {
   return /\b(remove|delete|drop|clear|empty|hide|strip|replace all|rewrite|simplify|start over)\b/i.test(String(prompt || ""));
 }
 
+function isVibeScopedLayoutOnlyPrompt(prompt = "") {
+  const normalized = String(prompt || "").toLowerCase();
+
+  if (!normalized || promptAllowsDestructiveScopeChange(normalized)) {
+    return false;
+  }
+
+  if (/\b(add|append|insert|include|create|new|remove|delete|drop|replace|rename|change text|update text|copy|label|badge|button|field|chart|graph|metric)\b/.test(normalized)) {
+    return false;
+  }
+
+  return /\b(bigger|larger|wider|taller|roomier|breath|breathing|spacing|padding|margin|gap|space|room|size|sizing)\b/.test(normalized);
+}
+
 function assertVibeScopedReplacementIsSafe(baseSubtree, generatedSubtree, prompt = "") {
   if (promptAllowsDestructiveScopeChange(prompt)) {
     return;
@@ -1066,7 +1080,13 @@ function mergeGeneratedVibeScope(generated, scope, { requireScope = false, promp
   }
 
   const baseSubtree = String(basePreview.html).slice(baseRange.start, baseRange.end);
-  assertVibeScopedReplacementIsSafe(baseSubtree, generatedSubtree, prompt);
+  const layoutOnlyScopedPrompt = isVibeScopedLayoutOnlyPrompt(prompt);
+
+  if (layoutOnlyScopedPrompt) {
+    generatedSubtree = baseSubtree;
+  } else {
+    assertVibeScopedReplacementIsSafe(baseSubtree, generatedSubtree, prompt);
+  }
 
   const cssPatch = getVibeScopedCssPatch(basePreview.css, generated.css);
   const scopeClass = cssPatch ? createVibeScopeClass(normalizedScope.layerPath) : "";
