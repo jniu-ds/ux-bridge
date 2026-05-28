@@ -644,6 +644,51 @@ function normalizeVibeScope(scope, { includeCurrentPreview = false } = {}) {
   return normalized;
 }
 
+function normalizeSelectedLayerVibeScope(selectedLayer, options = {}) {
+  if (!selectedLayer || typeof selectedLayer !== "object") {
+    return null;
+  }
+
+  const layerPath = String(selectedLayer.pathKey || selectedLayer.layerPath || selectedLayer.path || "").trim();
+
+  if (!layerPath || layerPath === "__screen__") {
+    return null;
+  }
+
+  return normalizeVibeScope(
+    {
+      type: "selected-layer",
+      layerPath,
+      label: selectedLayer.label || selectedLayer.tagName || selectedLayer.textSummary,
+      html: selectedLayer.html,
+      text: selectedLayer.textSummary || selectedLayer.text,
+      childCount: selectedLayer.childCount,
+      currentPreview: selectedLayer.currentPreview,
+    },
+    options,
+  );
+}
+
+function normalizeVibeScopePayload(payload, options = {}) {
+  if (!payload || typeof payload !== "object") {
+    return null;
+  }
+
+  return normalizeVibeScope(payload.scope || payload.generated?.scope, options) || normalizeSelectedLayerVibeScope(payload.selectedLayer, options);
+}
+
+function buildScopedProviderPreview(scope, currentPagePreview) {
+  if (!scope || !currentPagePreview) {
+    return null;
+  }
+
+  return {
+    css: scope.currentPreview?.css ?? currentPagePreview.css,
+    js: scope.currentPreview?.js ?? currentPagePreview.js,
+    breakpointOverrides: scope.currentPreview?.breakpointOverrides ?? currentPagePreview.breakpointOverrides,
+  };
+}
+
 const VIBE_SCOPE_VOID_TAGS = new Set([
   "area",
   "base",
@@ -940,17 +985,30 @@ function getVibeScopedCssPatch(baseCss, generatedCss) {
   return generated;
 }
 
-function mergeGeneratedVibeScope(generated, scope) {
+function mergeGeneratedVibeScope(generated, scope, { requireScope = false } = {}) {
   const normalizedScope = normalizeVibeScope(scope, { includeCurrentPreview: true });
   const basePreview = normalizedScope?.currentPreview;
 
-  if (!generated || !normalizedScope?.layerPath || !basePreview?.html || !generated.html) {
+  if (!normalizedScope?.layerPath) {
+    if (requireScope) {
+      throw new Error("Select the layer again before running a scoped Vibe edit.");
+    }
+    return generated;
+  }
+
+  if (!generated || !basePreview?.html || !generated.html) {
+    if (requireScope) {
+      throw new Error("The scoped Vibe edit could not be applied to the selected layer.");
+    }
     return generated;
   }
 
   const baseRange = findHtmlElementRangeByLayerPath(basePreview.html, normalizedScope.layerPath);
 
   if (!baseRange) {
+    if (requireScope) {
+      throw new Error("The selected layer changed before the scoped Vibe edit could be applied.");
+    }
     return generated;
   }
 
@@ -961,6 +1019,9 @@ function mergeGeneratedVibeScope(generated, scope) {
     : generatedHtml;
 
   if (!generatedSubtree) {
+    if (requireScope) {
+      throw new Error("The scoped Vibe response did not include an editable layer replacement.");
+    }
     return generated;
   }
 
@@ -3058,7 +3119,7 @@ export async function handleProjectsRequest(req) {
     const prompt = String(payload.prompt || "").trim();
     const includeProjectContext = payload.includeProjectContext !== false;
     const includePageContext = payload.includePageContext !== false;
-    const scope = normalizeVibeScope(payload.scope, { includeCurrentPreview: true });
+    const scope = normalizeVibeScopePayload(payload, { includeCurrentPreview: true });
 
     if (!projectId || !pageId) {
       return {
@@ -3106,13 +3167,7 @@ export async function handleProjectsRequest(req) {
     const providerScope = scope
       ? {
           ...scope,
-          currentPreview: scope.currentPreview
-            ? {
-                css: scope.currentPreview.css,
-                js: scope.currentPreview.js,
-                breakpointOverrides: scope.currentPreview.breakpointOverrides,
-              }
-            : null,
+          currentPreview: buildScopedProviderPreview(scope, currentPagePreview),
         }
       : null;
     const providerAuth =
@@ -3152,7 +3207,19 @@ export async function handleProjectsRequest(req) {
       };
     }
 
-    generated = mergeGeneratedVibeScope(generated, scope ? { ...scope, currentPreview: currentPagePreview } : null);
+    try {
+      generated = mergeGeneratedVibeScope(generated, scope ? { ...scope, currentPreview: currentPagePreview } : null, {
+        requireScope: Boolean(scope),
+      });
+    } catch (error) {
+      return {
+        status: 400,
+        payload: {
+          ok: false,
+          error: error instanceof Error ? error.message : "The scoped Vibe edit could not be applied.",
+        },
+      };
+    }
 
     const nextDraft = {
       providerId,
@@ -3389,7 +3456,7 @@ export async function handleProjectsRequest(req) {
     const prompt = String(payload.prompt || "").trim();
     const includeProjectContext = payload.includeProjectContext !== false;
     const includePageContext = payload.includePageContext !== false;
-    const scope = normalizeVibeScope(payload.scope || payload.generated?.scope);
+    const scope = normalizeVibeScopePayload(payload);
 
     if (!projectId || !pageId) {
       return {
@@ -3449,10 +3516,19 @@ export async function handleProjectsRequest(req) {
       };
     }
 
-    generated = mergeGeneratedVibeScope(generated, {
-      ...scope,
-      currentPreview: buildPagePreview(page),
-    });
+    try {
+      generated = mergeGeneratedVibeScope(generated, scope ? { ...scope, currentPreview: buildPagePreview(page) } : null, {
+        requireScope: Boolean(scope),
+      });
+    } catch (error) {
+      return {
+        status: 400,
+        payload: {
+          ok: false,
+          error: error instanceof Error ? error.message : "The scoped Vibe edit could not be saved.",
+        },
+      };
+    }
 
     const generatedAt = Number(payload.generated?.generatedAt) || Date.now();
     const nextDraft = {
