@@ -746,6 +746,200 @@ function findHtmlElementRangeByLayerPath(html, layerPath) {
   return null;
 }
 
+function createVibeScopeClass(layerPath) {
+  const suffix = String(layerPath || "")
+    .replace(/[^a-zA-Z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48);
+  return `ux-vibe-scoped-edit${suffix ? `-${suffix}` : ""}`;
+}
+
+function addClassToFirstHtmlElement(html, className) {
+  const source = String(html || "");
+  const match = source.match(/<([a-zA-Z][\w:-]*)([^<>]*?)>/);
+
+  if (!match) {
+    return source;
+  }
+
+  const fullTag = match[0];
+  const attrs = match[2] || "";
+  let nextTag;
+
+  if (/\sclass\s*=/.test(attrs)) {
+    nextTag = fullTag.replace(/\sclass\s*=\s*(["'])(.*?)\1/, (classMatch, quote, value) => {
+      const classes = String(value || "").split(/\s+/).filter(Boolean);
+      return classes.includes(className) ? classMatch : ` class=${quote}${[...classes, className].join(" ")}${quote}`;
+    });
+  } else {
+    nextTag = fullTag.replace(/>$/, ` class="${className}">`);
+  }
+
+  return `${source.slice(0, match.index)}${nextTag}${source.slice(match.index + fullTag.length)}`;
+}
+
+function findMatchingCssBrace(css, openIndex) {
+  let depth = 0;
+
+  for (let index = openIndex; index < css.length; index += 1) {
+    const char = css[index];
+
+    if (char === "{") {
+      depth += 1;
+    } else if (char === "}") {
+      depth -= 1;
+
+      if (depth === 0) {
+        return index;
+      }
+    }
+  }
+
+  return -1;
+}
+
+function splitCssSelectorList(selectorText) {
+  const selectors = [];
+  let current = "";
+  let quote = "";
+  let bracketDepth = 0;
+  let parenDepth = 0;
+
+  for (const char of String(selectorText || "")) {
+    if (quote) {
+      current += char;
+      if (char === quote) {
+        quote = "";
+      }
+      continue;
+    }
+
+    if (char === '"' || char === "'") {
+      quote = char;
+      current += char;
+      continue;
+    }
+
+    if (char === "[") {
+      bracketDepth += 1;
+    } else if (char === "]") {
+      bracketDepth = Math.max(0, bracketDepth - 1);
+    } else if (char === "(") {
+      parenDepth += 1;
+    } else if (char === ")") {
+      parenDepth = Math.max(0, parenDepth - 1);
+    }
+
+    if (char === "," && bracketDepth === 0 && parenDepth === 0) {
+      selectors.push(current.trim());
+      current = "";
+      continue;
+    }
+
+    current += char;
+  }
+
+  if (current.trim()) {
+    selectors.push(current.trim());
+  }
+
+  return selectors;
+}
+
+function prefixVibeScopedSelector(selector, className) {
+  let trimmed = String(selector || "").trim();
+
+  if (!trimmed || trimmed.includes(`.${className}`)) {
+    return trimmed;
+  }
+
+  trimmed = trimmed
+    .replace(/^:where\(\s*\.vibe-generated-page\s*\)\s*/, "")
+    .replace(/^\.vibe-generated-page\b\s*/, "")
+    .trim();
+
+  if (!trimmed || trimmed === "html" || trimmed === "body" || trimmed === ":root") {
+    return `.${className}`;
+  }
+
+  if (/^(html|body|:root)\b/.test(trimmed)) {
+    trimmed = trimmed.replace(/^(html|body|:root)\b\s*/, "").trim();
+    return trimmed ? `.${className} ${trimmed}` : `.${className}`;
+  }
+
+  if (/^[>+~]/.test(trimmed)) {
+    return `.${className} ${trimmed}`;
+  }
+
+  if (/^[.#[:]/.test(trimmed)) {
+    return `.${className}${trimmed}, .${className} ${trimmed}`;
+  }
+
+  return `.${className} ${trimmed}`;
+}
+
+function scopeVibeCssPatch(css, className) {
+  const source = String(css || "").trim();
+
+  if (!source) {
+    return "";
+  }
+
+  let output = "";
+  let cursor = 0;
+
+  while (cursor < source.length) {
+    const openIndex = source.indexOf("{", cursor);
+
+    if (openIndex === -1) {
+      output += source.slice(cursor);
+      break;
+    }
+
+    const selector = source.slice(cursor, openIndex).trim();
+    const closeIndex = findMatchingCssBrace(source, openIndex);
+
+    if (closeIndex === -1) {
+      output += source.slice(cursor);
+      break;
+    }
+
+    const body = source.slice(openIndex + 1, closeIndex);
+    const lowerSelector = selector.toLowerCase();
+
+    if (/^@(keyframes|-webkit-keyframes|font-face|property|page)\b/.test(lowerSelector)) {
+      output += `${selector} {${body}}\n`;
+    } else if (/^@(media|supports|container|layer)\b/.test(lowerSelector)) {
+      output += `${selector} {\n${scopeVibeCssPatch(body, className)}\n}\n`;
+    } else if (selector) {
+      const scopedSelector = splitCssSelectorList(selector)
+        .map((entry) => prefixVibeScopedSelector(entry, className))
+        .filter(Boolean)
+        .join(", ");
+      output += `${scopedSelector} {${body}}\n`;
+    }
+
+    cursor = closeIndex + 1;
+  }
+
+  return output.trim();
+}
+
+function getVibeScopedCssPatch(baseCss, generatedCss) {
+  const base = String(baseCss || "").trim();
+  const generated = String(generatedCss || "").trim();
+
+  if (!generated) {
+    return "";
+  }
+
+  if (base && generated.startsWith(base)) {
+    return generated.slice(base.length).trim();
+  }
+
+  return generated;
+}
+
 function mergeGeneratedVibeScope(generated, scope) {
   const normalizedScope = normalizeVibeScope(scope, { includeCurrentPreview: true });
   const basePreview = normalizedScope?.currentPreview;
@@ -762,7 +956,7 @@ function mergeGeneratedVibeScope(generated, scope) {
 
   const generatedHtml = String(generated.html || "").trim();
   const generatedRange = findHtmlElementRangeByLayerPath(generatedHtml, normalizedScope.layerPath);
-  const generatedSubtree = generatedRange
+  let generatedSubtree = generatedRange
     ? generatedHtml.slice(generatedRange.start, generatedRange.end)
     : generatedHtml;
 
@@ -770,12 +964,20 @@ function mergeGeneratedVibeScope(generated, scope) {
     return generated;
   }
 
+  const cssPatch = getVibeScopedCssPatch(basePreview.css, generated.css);
+  const scopeClass = cssPatch ? createVibeScopeClass(normalizedScope.layerPath) : "";
+  const scopedCssPatch = cssPatch && scopeClass ? scopeVibeCssPatch(cssPatch, scopeClass) : "";
+
+  if (scopeClass && scopedCssPatch) {
+    generatedSubtree = addClassToFirstHtmlElement(generatedSubtree, scopeClass);
+  }
+
   const html = `${String(basePreview.html).slice(0, baseRange.start)}${generatedSubtree}${String(basePreview.html).slice(baseRange.end)}`;
 
   return {
     ...generated,
     html,
-    css: [basePreview.css || "", generated.css || ""].filter(Boolean).join("\n\n"),
+    css: [basePreview.css || "", scopedCssPatch].filter(Boolean).join("\n\n"),
     js: [basePreview.js || "", generated.js || ""].filter(Boolean).join("\n\n"),
     breakpointOverrides: generated.breakpointOverrides || basePreview.breakpointOverrides || {},
   };
