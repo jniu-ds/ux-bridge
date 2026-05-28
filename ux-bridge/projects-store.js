@@ -3190,6 +3190,7 @@ export async function handleProjectsRequest(req) {
         includePageContext,
         scope: providerScope,
         currentPreview: providerScope ? providerScope.currentPreview : currentPagePreview,
+        allowEmptyScopedCss: Boolean(payload.allowEmptyScopedCss && scope),
         currentUser: {
           email: user.email,
           fullName: user.fullName,

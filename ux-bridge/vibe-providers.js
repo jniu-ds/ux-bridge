@@ -721,10 +721,14 @@ function normalizeGeneratedImageTags(html = "") {
   });
 }
 
-function validateGeneratedCss(css) {
+function validateGeneratedCss(css, options = {}) {
   const trimmed = String(css || "").trim();
 
   if (!trimmed) {
+    if (options.allowEmpty) {
+      return "";
+    }
+
     throw new Error("Codex returned empty CSS.");
   }
 
@@ -765,7 +769,7 @@ function buildCodexPageResultFromParsed(parsed = {}, summaryFallback = "Codex ge
     availableVia: "provider-adapter",
     summary: String(parsed.summary || "").trim() || summaryFallback,
     html: options.scoped ? validateGeneratedHtmlFragment(parsed.html) : validateGeneratedHtml(parsed.html),
-    css: validateGeneratedCss(parsed.css),
+    css: validateGeneratedCss(parsed.css, { allowEmpty: options.allowEmptyCss }),
     js: validateGeneratedJs(parsed.js),
     assets: Array.isArray(parsed.assets) ? parsed.assets : [],
   };
@@ -932,6 +936,7 @@ async function generateCodexPageResult({
   figmaImport = null,
   scope = null,
   currentPreview = null,
+  allowEmptyScopedCss = false,
 }) {
   const apiKey = String(providerAuth?.apiKey || "").trim();
 
@@ -996,7 +1001,10 @@ async function generateCodexPageResult({
   const firstPass = buildCodexPageResultFromParsed(
     parsed,
     "Codex generated a page-scoped UI concept.",
-    { scoped: scope?.type === "selected-layer" && scope.layerPath },
+    {
+      scoped: scope?.type === "selected-layer" && scope.layerPath,
+      allowEmptyCss: Boolean(allowEmptyScopedCss && scope?.type === "selected-layer" && scope.layerPath),
+    },
   );
 
   return runFigmaFastQaPass({
@@ -1041,6 +1049,7 @@ export async function generateVibePageResult({
   providerAuth,
   scope = null,
   currentPreview = null,
+  allowEmptyScopedCss = false,
 }) {
   const provider = PROVIDERS.find((entry) => entry.id === providerId) || PROVIDERS[0];
 
@@ -1054,6 +1063,7 @@ export async function generateVibePageResult({
       providerAuth,
       scope,
       currentPreview,
+      allowEmptyScopedCss,
     });
   }
 
