@@ -391,7 +391,7 @@ function buildCodexSystemPrompt() {
     "Use root.querySelector/querySelectorAll to attach scoped event listeners, manage local state in closure variables, and return a cleanup function when listeners or timers are created.",
     "Do not use imports, exports, network requests, document.write, inline handlers, or selectors outside root.",
     "When a selected layer scope is provided, preserve the existing preview and edit only the selected layer and its descendants, plus any directly necessary scoped CSS or JS.",
-    "For scoped edits, still return the full page JSON contract, but do not rewrite unrelated markup, text, layout, styles, or interactions outside the target subtree.",
+    "For scoped edits, return only the replacement HTML for the selected layer in the html field, not the full page. Return only small additive css/js patches when needed.",
     "Keep the output polished, intentional, and mobile-first.",
   ].join(" ");
 }
@@ -452,8 +452,8 @@ function buildCodexUserPrompt({
   scope = null,
   currentPreview = null,
 }) {
-  const previewContext = compactCodexPreviewForPrompt(scope?.currentPreview || currentPreview);
   const scopedEdit = scope?.type === "selected-layer" && scope.layerPath;
+  const previewContext = scopedEdit ? compactCodexPreviewForPrompt(scope?.currentPreview) : compactCodexPreviewForPrompt(currentPreview);
   const contextLines = [
     `Project: ${projectName}`,
     `Page: ${pageName}`,
@@ -469,7 +469,8 @@ function buildCodexUserPrompt({
         `Target child count: ${Number(scope.childCount) || 0}`,
         `Target current HTML subtree: ${String(scope.html || "").slice(0, 70000)}`,
         "Scope rule: edit only this selected layer and its children. Preserve every unrelated layer outside this subtree.",
-        "Return the complete page html/css/js so UX Bridge can save a normal draft, but keep unrelated page code unchanged.",
+        "Return html as the replacement markup for only this selected layer. Do not return .vibe-generated-page or unrelated page markup.",
+        "Return css/js only if this subtree needs a small additive patch. Leave css/js empty when the existing page code is enough.",
       ]
     : ["Selected layer scope: no", "Apply the prompt to the whole .vibe-generated-page preview."];
 
@@ -479,7 +480,7 @@ function buildCodexUserPrompt({
       : "Create or modify a page-scoped mobile UI concept for the current UX Bridge page.",
     contextLines.join("\n"),
     scopeLines.join("\n"),
-    previewContext ? `Current full preview JSON: ${JSON.stringify(previewContext)}` : "",
+    previewContext ? `Current preview context JSON: ${JSON.stringify(previewContext)}` : "",
     "Return JSON with keys: summary, html, css, js, assets.",
     "Use js for rich interactions such as toggles, filters, accordions, tab states, sliders, counters, or lightweight animation behavior.",
     "assets should be an empty array unless you truly need named assets.",
@@ -631,6 +632,20 @@ function validateGeneratedHtml(html) {
   return trimmed;
 }
 
+function validateGeneratedHtmlFragment(html) {
+  const trimmed = normalizeGeneratedImageTags(String(html || "").trim());
+
+  if (!trimmed) {
+    throw new Error("Codex returned empty HTML.");
+  }
+
+  if (/<script\b/i.test(trimmed) || /\son[a-z]+\s*=/i.test(trimmed) || /<(?:html|head|body)\b/i.test(trimmed)) {
+    throw new Error("Codex returned unsupported markup for the selected layer.");
+  }
+
+  return trimmed;
+}
+
 function parseGeneratedHtmlAttributes(attributeSource = "") {
   const attrs = {};
   const pattern = /([^\s"'<>/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g;
@@ -742,14 +757,14 @@ function validateGeneratedJs(js) {
   return trimmed;
 }
 
-function buildCodexPageResultFromParsed(parsed = {}, summaryFallback = "Codex generated a page-scoped UI concept.") {
+function buildCodexPageResultFromParsed(parsed = {}, summaryFallback = "Codex generated a page-scoped UI concept.", options = {}) {
   return {
     providerId: "codex",
     providerLabel: "Codex",
     credentialMode: "user-session",
     availableVia: "provider-adapter",
     summary: String(parsed.summary || "").trim() || summaryFallback,
-    html: validateGeneratedHtml(parsed.html),
+    html: options.scoped ? validateGeneratedHtmlFragment(parsed.html) : validateGeneratedHtml(parsed.html),
     css: validateGeneratedCss(parsed.css),
     js: validateGeneratedJs(parsed.js),
     assets: Array.isArray(parsed.assets) ? parsed.assets : [],
@@ -978,7 +993,11 @@ async function generateCodexPageResult({
   };
 
   const parsed = await requestCodexStructuredPageResult({ apiKey, requestBody });
-  const firstPass = buildCodexPageResultFromParsed(parsed);
+  const firstPass = buildCodexPageResultFromParsed(
+    parsed,
+    "Codex generated a page-scoped UI concept.",
+    { scoped: scope?.type === "selected-layer" && scope.layerPath },
+  );
 
   return runFigmaFastQaPass({
     apiKey,

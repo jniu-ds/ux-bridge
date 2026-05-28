@@ -755,20 +755,28 @@ function mergeGeneratedVibeScope(generated, scope) {
   }
 
   const baseRange = findHtmlElementRangeByLayerPath(basePreview.html, normalizedScope.layerPath);
-  const generatedRange = findHtmlElementRangeByLayerPath(generated.html, normalizedScope.layerPath);
 
-  if (!baseRange || !generatedRange) {
+  if (!baseRange) {
     return generated;
   }
 
-  const generatedSubtree = String(generated.html).slice(generatedRange.start, generatedRange.end);
+  const generatedHtml = String(generated.html || "").trim();
+  const generatedRange = findHtmlElementRangeByLayerPath(generatedHtml, normalizedScope.layerPath);
+  const generatedSubtree = generatedRange
+    ? generatedHtml.slice(generatedRange.start, generatedRange.end)
+    : generatedHtml;
+
+  if (!generatedSubtree) {
+    return generated;
+  }
+
   const html = `${String(basePreview.html).slice(0, baseRange.start)}${generatedSubtree}${String(basePreview.html).slice(baseRange.end)}`;
 
   return {
     ...generated,
     html,
-    css: generated.css || basePreview.css || "",
-    js: generated.js || basePreview.js || "",
+    css: [basePreview.css || "", generated.css || ""].filter(Boolean).join("\n\n"),
+    js: [basePreview.js || "", generated.js || ""].filter(Boolean).join("\n\n"),
     breakpointOverrides: generated.breakpointOverrides || basePreview.breakpointOverrides || {},
   };
 }
@@ -2892,6 +2900,19 @@ export async function handleProjectsRequest(req) {
     }
 
     const generatedAt = Date.now();
+    const currentPagePreview = buildPagePreview(page);
+    const providerScope = scope
+      ? {
+          ...scope,
+          currentPreview: scope.currentPreview
+            ? {
+                css: scope.currentPreview.css,
+                js: scope.currentPreview.js,
+                breakpointOverrides: scope.currentPreview.breakpointOverrides,
+              }
+            : null,
+        }
+      : null;
     const providerAuth =
       providerId === "codex"
         ? {
@@ -2910,8 +2931,8 @@ export async function handleProjectsRequest(req) {
         pageName: page.name,
         includeProjectContext,
         includePageContext,
-        scope,
-        currentPreview: scope?.currentPreview || buildPagePreview(page),
+        scope: providerScope,
+        currentPreview: providerScope ? providerScope.currentPreview : currentPagePreview,
         currentUser: {
           email: user.email,
           fullName: user.fullName,
@@ -2929,7 +2950,7 @@ export async function handleProjectsRequest(req) {
       };
     }
 
-    generated = mergeGeneratedVibeScope(generated, scope);
+    generated = mergeGeneratedVibeScope(generated, scope ? { ...scope, currentPreview: currentPagePreview } : null);
 
     const nextDraft = {
       providerId,

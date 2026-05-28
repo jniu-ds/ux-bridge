@@ -173,13 +173,11 @@
   }
 
   function buildCurrentPreviewSnapshot() {
-    const root = getPreviewRenderRoot();
     const preview = state.page?.preview || state.page?.vibe?.appliedDraft || {};
 
     return {
-      html: compactPreviewText(root?.outerHTML || preview.html || "", 100000),
-      css: compactPreviewText(preview.css || "", 100000),
-      js: compactPreviewText(preview.js || "", 30000),
+      css: compactPreviewText(preview.css || "", 20000),
+      js: compactPreviewText(preview.js || "", 12000),
       breakpointOverrides: preview.breakpointOverrides || {},
     };
   }
