@@ -53,6 +53,162 @@
     }
   }
 
+  function getPreviewTooltipText(target) {
+    if (!(target instanceof Element)) {
+      return "";
+    }
+
+    const attrs = [
+      "data-tooltip",
+      "data-hover-label",
+      "data-hover-value",
+      "data-chart-tooltip",
+      "data-point-value",
+      "data-value",
+      "title",
+    ];
+
+    for (const attr of attrs) {
+      const value = target.getAttribute(attr);
+      if (value && value.trim()) {
+        return value.trim();
+      }
+    }
+
+    const aria = target.getAttribute("aria-label");
+    if (aria && aria.trim() && aria.trim().length <= 80) {
+      return aria.trim();
+    }
+
+    const titleNode = target.querySelector?.("title");
+    if (titleNode?.textContent?.trim()) {
+      return titleNode.textContent.trim();
+    }
+
+    return "";
+  }
+
+  function attachPreviewTooltipRuntime() {
+    if (!vibeMobileRender) {
+      return null;
+    }
+
+    const tooltipSelector = [
+      "[data-tooltip]",
+      "[data-hover-label]",
+      "[data-hover-value]",
+      "[data-chart-tooltip]",
+      "[data-point-value]",
+      "[data-value]",
+      "[title]",
+      "svg [aria-label]",
+    ].join(",");
+
+    const tooltip = document.createElement("div");
+    tooltip.className = "ux-bridge-preview-tooltip";
+    tooltip.hidden = true;
+    Object.assign(tooltip.style, {
+      position: "fixed",
+      zIndex: "2147483647",
+      pointerEvents: "none",
+      maxWidth: "180px",
+      padding: "6px 8px",
+      borderRadius: "8px",
+      background: "rgba(15, 23, 42, 0.92)",
+      color: "#fff",
+      fontSize: "12px",
+      fontWeight: "700",
+      lineHeight: "1.2",
+      textAlign: "center",
+      boxShadow: "0 10px 24px rgba(15, 23, 42, 0.22)",
+      transform: "translate3d(0, 0, 0)",
+    });
+    document.body.appendChild(tooltip);
+
+    let activeTarget = null;
+    let frame = 0;
+
+    const resolveTarget = (node) => {
+      if (!(node instanceof Element)) {
+        return null;
+      }
+      if (node.matches(tooltipSelector)) {
+        return node;
+      }
+      return node.closest(tooltipSelector);
+    };
+
+    const positionTooltip = () => {
+      if (!activeTarget || tooltip.hidden) {
+        return;
+      }
+
+      const rect = activeTarget.getBoundingClientRect();
+      if (!rect.width && !rect.height) {
+        tooltip.hidden = true;
+        return;
+      }
+
+      const margin = 8;
+      const width = tooltip.offsetWidth || 0;
+      const height = tooltip.offsetHeight || 0;
+      const left = Math.max(margin, Math.min(window.innerWidth - width - margin, rect.left + rect.width / 2 - width / 2));
+      const top = Math.max(margin, rect.top - height - margin);
+      tooltip.style.left = `${left}px`;
+      tooltip.style.top = `${top}px`;
+    };
+
+    const schedulePosition = () => {
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(positionTooltip);
+    };
+
+    const showTooltip = (event) => {
+      const target = resolveTarget(event.target);
+      const text = getPreviewTooltipText(target);
+      if (!target || !text) {
+        return;
+      }
+
+      activeTarget = target;
+      tooltip.textContent = text;
+      tooltip.hidden = false;
+      schedulePosition();
+    };
+
+    const hideTooltip = (event) => {
+      if (
+        event.type === "pointerout" &&
+        activeTarget &&
+        event.relatedTarget instanceof Node &&
+        activeTarget.contains(event.relatedTarget)
+      ) {
+        return;
+      }
+
+      activeTarget = null;
+      tooltip.hidden = true;
+    };
+
+    vibeMobileRender.addEventListener("pointerover", showTooltip, true);
+    vibeMobileRender.addEventListener("pointerout", hideTooltip, true);
+    vibeMobileRender.addEventListener("focusin", showTooltip, true);
+    vibeMobileRender.addEventListener("focusout", hideTooltip, true);
+    window.addEventListener("scroll", schedulePosition, true);
+    window.addEventListener("resize", schedulePosition);
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      vibeMobileRender.removeEventListener("pointerover", showTooltip, true);
+      vibeMobileRender.removeEventListener("pointerout", hideTooltip, true);
+      vibeMobileRender.removeEventListener("focusin", showTooltip, true);
+      vibeMobileRender.removeEventListener("focusout", hideTooltip, true);
+      window.removeEventListener("scroll", schedulePosition, true);
+      window.removeEventListener("resize", schedulePosition);
+      tooltip.remove();
+    };
+  }
+
   function runPreviewScript(page, preview) {
     cleanupPreviewScript();
 
@@ -61,21 +217,32 @@
     }
 
     const previewJs = String(preview?.js || "").trim();
-
-    if (!previewJs) {
-      return;
-    }
+    const tooltipCleanup = attachPreviewTooltipRuntime();
+    let generatedCleanup = null;
 
     const root = vibeMobileRender.firstElementChild instanceof HTMLElement ? vibeMobileRender.firstElementChild : vibeMobileRender;
 
-    try {
-      const cleanup = new Function("root", "page", "project", "api", previewJs)(root, page, state.project, {});
+    if (previewJs) {
+      try {
+        const cleanup = new Function("root", "page", "project", "api", previewJs)(root, page, state.project, {});
 
-      if (typeof cleanup === "function") {
-        vibeMobileRender.__uxBridgePreviewCleanup = cleanup;
+        if (typeof cleanup === "function") {
+          generatedCleanup = cleanup;
+        }
+      } catch (error) {
+        console.warn("[project-page] preview.js failed", error);
       }
-    } catch (error) {
-      console.warn("[project-page] preview.js failed", error);
+    }
+
+    if (typeof generatedCleanup === "function" || typeof tooltipCleanup === "function") {
+      vibeMobileRender.__uxBridgePreviewCleanup = () => {
+        if (typeof generatedCleanup === "function") {
+          generatedCleanup();
+        }
+        if (typeof tooltipCleanup === "function") {
+          tooltipCleanup();
+        }
+      };
     }
   }
 
