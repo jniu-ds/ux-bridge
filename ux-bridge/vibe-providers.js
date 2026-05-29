@@ -470,6 +470,31 @@ function extractScopedTextSnippets(html = "") {
   return snippets;
 }
 
+function extractScopedSemanticAnchors(html = "") {
+  const snippets = extractScopedTextSnippets(html);
+  const anchors = [];
+  const seen = new Set();
+
+  for (const snippet of snippets) {
+    const normalized = normalizeContentText(snippet);
+    const isMetric = /[\d$%]/.test(snippet);
+    const isLikelyLabel = /[a-z]/i.test(snippet) && snippet.length <= 60;
+
+    if (!normalized || seen.has(normalized) || (!isMetric && !isLikelyLabel)) {
+      continue;
+    }
+
+    seen.add(normalized);
+    anchors.push(snippet);
+
+    if (anchors.length >= 24) {
+      break;
+    }
+  }
+
+  return anchors;
+}
+
 function extractScopedClassTokens(html = "") {
   const tokens = [];
   const seen = new Set();
@@ -504,6 +529,7 @@ function buildScopedPreservationManifest(scope = {}) {
   return {
     targetChildCount: Number(scope?.childCount) || 0,
     textSnippets: extractScopedTextSnippets(html).slice(0, 40),
+    semanticAnchors: extractScopedSemanticAnchors(html).slice(0, 24),
     classTokens: extractScopedClassTokens(html).slice(0, 40),
     tagCount: countHtmlTags(html),
   };
@@ -525,6 +551,7 @@ function analyzeScopedPreservation({ prompt = "", originalHtml = "", resultHtml 
   const originalTagCount = countHtmlTags(original);
   const resultTagCount = countHtmlTags(result);
   const originalTextSnippets = extractScopedTextSnippets(original);
+  const originalSemanticAnchors = extractScopedSemanticAnchors(original);
   const resultText = normalizeContentText(result);
   const originalClassTokens = extractScopedClassTokens(original);
 
@@ -533,6 +560,9 @@ function analyzeScopedPreservation({ prompt = "", originalHtml = "", resultHtml 
   const missingTextSnippets = textReplacementAllowed
     ? []
     : originalTextSnippets.filter((snippet) => !resultText.includes(normalizeContentText(snippet))).slice(0, 12);
+  const missingSemanticAnchors = textReplacementAllowed
+    ? []
+    : originalSemanticAnchors.filter((snippet) => !resultText.includes(normalizeContentText(snippet))).slice(0, 12);
   const missingClassTokens = originalClassTokens
     .filter((token) => !new RegExp(`\\bclass\\s*=\\s*["'][^"']*\\b${token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(result))
     .slice(0, 12);
@@ -550,6 +580,10 @@ function analyzeScopedPreservation({ prompt = "", originalHtml = "", resultHtml 
     reasons.push("The scoped response removed meaningful existing text.");
   }
 
+  if (!removalAllowed && missingSemanticAnchors.length >= Math.max(1, Math.ceil(Math.min(originalSemanticAnchors.length, 8) * 0.35))) {
+    reasons.push("The scoped response changed the selected layer's subject, metrics, or semantic anchors.");
+  }
+
   if (!removalAllowed && originalClassTokens.length >= 4 && missingClassTokens.length >= Math.ceil(Math.min(originalClassTokens.length, 12) * 0.6)) {
     reasons.push("The scoped response removed most existing class hooks.");
   }
@@ -558,6 +592,7 @@ function analyzeScopedPreservation({ prompt = "", originalHtml = "", resultHtml 
     ok: reasons.length === 0,
     reasons,
     missingTextSnippets,
+    missingSemanticAnchors,
     missingClassTokens,
     originalTagCount,
     resultTagCount,
@@ -617,7 +652,10 @@ function buildCodexUserPrompt({
         `Target current HTML subtree: ${String(scope.html || "").slice(0, 70000)}`,
         "Scope rule: edit only this selected layer and its children. Preserve every unrelated layer outside this subtree.",
         "Preservation contract: the selected layer root, meaningful existing text, child cards, metrics, labels, badges, controls, and class hooks must remain unless the user explicitly asks to remove or replace them.",
+        "Semantic preservation: do not rename the selected layer's topic, business meaning, metric names, values, captions, status badges, or time ranges unless the user explicitly asks for those words or values to change.",
+        "Visual preservation: keep the selected layer's existing color palette, typography feel, border radius, spacing rhythm, and card style unless the user explicitly asks to restyle them.",
         "Allowed scoped additions: wrappers, hover labels, tooltips, chart bars/points, data attributes, ARIA attributes, and small scoped CSS/JS needed to complete the request.",
+        "For scoped chart requests, change only the chart representation and required chart interaction. Preserve the surrounding card title, KPI values, badges, labels, captions, colors, and non-chart content.",
         "For scoped layout or spacing requests, preserve all existing child cards, text, metrics, labels, badges, and controls unless the user explicitly asks to remove them.",
         "If the user asks to make existing elements bigger, roomier, wider, taller, or more breathable, prefer CSS spacing/sizing changes and keep the selected layer's child structure intact.",
         "For scoped layout-only requests such as spacing, padding, sizing, or making cards roomier, return the original Target current HTML subtree unchanged and put the visual change in css.",
@@ -639,6 +677,7 @@ function buildCodexUserPrompt({
           `Rejected summary: ${String(repairContext?.summary || "").slice(0, 1000)}`,
           `Rejected reasons: ${(repairContext?.analysis?.reasons || []).join(" ")}`,
           `Missing text snippets: ${(repairContext?.analysis?.missingTextSnippets || []).join(" | ")}`,
+          `Missing semantic anchors: ${(repairContext?.analysis?.missingSemanticAnchors || []).join(" | ")}`,
           `Missing class hooks: ${(repairContext?.analysis?.missingClassTokens || []).join(" | ")}`,
           `Original tag count: ${repairContext?.analysis?.originalTagCount || 0}; returned tag count: ${repairContext?.analysis?.resultTagCount || 0}`,
           "Return a corrected scoped response that keeps the original selected-layer content by default while still implementing the user's requested addition or visual change.",
