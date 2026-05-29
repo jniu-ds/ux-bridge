@@ -495,6 +495,58 @@ function extractScopedSemanticAnchors(html = "") {
   return anchors;
 }
 
+function extractScopedChartDataHints(html = "") {
+  const hints = [];
+  const seen = new Set();
+  const source = String(html || "");
+  const addHint = (label = "", value = "") => {
+    const normalizedLabel = String(label || "").replace(/\s+/g, " ").trim();
+    const normalizedValue = decodeHtmlEntities(String(value || "")).replace(/\s+/g, " ").trim();
+
+    if (!normalizedValue || normalizedValue.length > 180 || !/[a-z0-9$%.-]/i.test(normalizedValue)) {
+      return;
+    }
+
+    const key = `${normalizedLabel}:${normalizedValue}`.toLowerCase();
+    if (seen.has(key)) {
+      return;
+    }
+
+    seen.add(key);
+    hints.push(normalizedLabel ? `${normalizedLabel}: ${normalizedValue}` : normalizedValue);
+  };
+
+  for (const attrMatch of source.matchAll(/\b(data-(?:value|values|label|labels|amount|metric|point|points|week|weeks|x|y|series|tooltip|chart|datum)|aria-label|title)\s*=\s*["']([^"']+)["']/gi)) {
+    addHint(attrMatch[1], attrMatch[2]);
+
+    if (hints.length >= 40) {
+      return hints;
+    }
+  }
+
+  for (const styleMatch of source.matchAll(/\bstyle\s*=\s*["']([^"']+)["']/gi)) {
+    const style = styleMatch[1];
+
+    for (const varMatch of style.matchAll(/(--(?:[^:;]*?(?:value|amount|metric|score|point|x|y|height|width|week|chart)[^:;]*?)|(?:height|width|left|top|bottom|right))\s*:\s*([^;]+)/gi)) {
+      addHint(varMatch[1], varMatch[2]);
+
+      if (hints.length >= 40) {
+        return hints;
+      }
+    }
+  }
+
+  for (const svgMatch of source.matchAll(/\b(?:points|d|cx|cy|x1|x2|y1|y2|r)\s*=\s*["']([^"']+)["']/gi)) {
+    addHint(svgMatch[0].split("=")[0], svgMatch[1].slice(0, 120));
+
+    if (hints.length >= 40) {
+      return hints;
+    }
+  }
+
+  return hints;
+}
+
 function extractScopedClassTokens(html = "") {
   const tokens = [];
   const seen = new Set();
@@ -530,6 +582,7 @@ function buildScopedPreservationManifest(scope = {}) {
     targetChildCount: Number(scope?.childCount) || 0,
     textSnippets: extractScopedTextSnippets(html).slice(0, 40),
     semanticAnchors: extractScopedSemanticAnchors(html).slice(0, 24),
+    chartDataHints: extractScopedChartDataHints(html).slice(0, 32),
     classTokens: extractScopedClassTokens(html).slice(0, 40),
     tagCount: countHtmlTags(html),
   };
@@ -541,6 +594,12 @@ function promptAllowsScopedRemoval(prompt = "") {
 
 function promptAllowsTextReplacement(prompt = "") {
   return /\b(change|replace|rename|rewrite|edit|update)\b[^.]{0,40}\b(text|copy|wording|label|title|heading|headline|content)\b/i.test(
+    String(prompt || ""),
+  );
+}
+
+function promptIsScopedAdditiveInteraction(prompt = "") {
+  return /\b(hover|focus|tooltip|tool\s*tip|hover\s+label|hover\s+labels|callout|popover|show\s+(?:the\s+)?(?:value|amount|label)|on\s+hover|on\s+focus)\b/i.test(
     String(prompt || ""),
   );
 }
@@ -656,6 +715,8 @@ function buildCodexUserPrompt({
         "Visual preservation: keep the selected layer's existing color palette, typography feel, border radius, spacing rhythm, and card style unless the user explicitly asks to restyle them.",
         "Allowed scoped additions: wrappers, hover labels, tooltips, chart bars/points, data attributes, ARIA attributes, and small scoped CSS/JS needed to complete the request.",
         "For scoped chart requests, change only the chart representation and required chart interaction. Preserve the surrounding card title, KPI values, badges, labels, captions, colors, and non-chart content.",
+        "Chart data preservation: when changing chart type or adding chart interactions, reuse the exact existing chart values, labels, time points, data attributes, inline CSS variable values, and SVG point data from the preservation manifest. Translate those same values into the new chart representation; do not invent replacement metrics, topics, labels, or values.",
+        "For hover/focus labels or tooltips, treat the request as additive. Preserve the original selected-layer HTML and values, then add only the minimum data attributes, tooltip markup, CSS, or JS required to reveal the labels.",
         "For scoped layout or spacing requests, preserve all existing child cards, text, metrics, labels, badges, and controls unless the user explicitly asks to remove them.",
         "If the user asks to make existing elements bigger, roomier, wider, taller, or more breathable, prefer CSS spacing/sizing changes and keep the selected layer's child structure intact.",
         "For scoped layout-only requests such as spacing, padding, sizing, or making cards roomier, return the original Target current HTML subtree unchanged and put the visual change in css.",
@@ -964,6 +1025,27 @@ function validateGeneratedJs(js) {
   return trimmed;
 }
 
+function applyScopedAdditiveHtmlFallback(parsed = {}, scope = null, prompt = "") {
+  const scopedEdit = scope?.type === "selected-layer" && scope.layerPath;
+
+  if (!scopedEdit || !promptIsScopedAdditiveInteraction(prompt) || String(parsed?.html || "").trim()) {
+    return parsed;
+  }
+
+  const hasAdditiveCode = String(parsed?.css || "").trim() || String(parsed?.js || "").trim();
+  const originalHtml = String(scope?.html || "").trim();
+
+  if (!hasAdditiveCode || !originalHtml) {
+    return parsed;
+  }
+
+  return {
+    ...parsed,
+    html: originalHtml,
+    summary: parsed.summary || "Added scoped chart interaction while preserving the selected layer.",
+  };
+}
+
 function buildCodexPageResultFromParsed(parsed = {}, summaryFallback = "Codex generated a page-scoped UI concept.", options = {}) {
   return {
     providerId: "codex",
@@ -1167,9 +1249,12 @@ async function repairScopedCodexResult({
         text: responseFormat,
       },
     });
-    const repaired = buildCodexPageResultFromParsed(parsed, firstPass?.summary, {
+    const normalizedParsed = applyScopedAdditiveHtmlFallback(parsed, scope, prompt);
+    const allowAdditiveEmptyCss =
+      promptIsScopedAdditiveInteraction(prompt) && Boolean(String(normalizedParsed?.js || "").trim());
+    const repaired = buildCodexPageResultFromParsed(normalizedParsed, firstPass?.summary, {
       scoped: true,
-      allowEmptyCss: Boolean(allowEmptyScopedCss),
+      allowEmptyCss: Boolean(allowEmptyScopedCss || allowAdditiveEmptyCss),
     });
     const repairedAnalysis = analyzeScopedPreservation({
       prompt,
@@ -1265,17 +1350,21 @@ async function generateCodexPageResult({
   };
 
   const parsed = await requestCodexStructuredPageResult({ apiKey, requestBody });
+  const scopedEdit = scope?.type === "selected-layer" && scope.layerPath;
+  const normalizedParsed = applyScopedAdditiveHtmlFallback(parsed, scope, prompt);
+  const allowAdditiveEmptyCss =
+    scopedEdit && promptIsScopedAdditiveInteraction(prompt) && Boolean(String(normalizedParsed?.js || "").trim());
   const firstPass = buildCodexPageResultFromParsed(
-    parsed,
+    normalizedParsed,
     "Codex generated a page-scoped UI concept.",
     {
-      scoped: scope?.type === "selected-layer" && scope.layerPath,
-      allowEmptyCss: Boolean(allowEmptyScopedCss && scope?.type === "selected-layer" && scope.layerPath),
+      scoped: scopedEdit,
+      allowEmptyCss: Boolean((allowEmptyScopedCss && scopedEdit) || allowAdditiveEmptyCss),
     },
   );
   let result = firstPass;
 
-  if (!figmaImport && scope?.type === "selected-layer" && scope.layerPath) {
+  if (!figmaImport && scopedEdit) {
     const analysis = analyzeScopedPreservation({
       prompt,
       originalHtml: scope.html,
