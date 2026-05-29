@@ -420,6 +420,150 @@ function compactCodexPreviewForPrompt(preview = {}) {
   };
 }
 
+function decodeHtmlEntities(value = "") {
+  return String(value || "")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, "\"")
+    .replace(/&#39;/gi, "'");
+}
+
+function normalizeContentText(value = "") {
+  return decodeHtmlEntities(value)
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function extractScopedTextSnippets(html = "") {
+  const snippets = [];
+  const seen = new Set();
+  const source = String(html || "")
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/<style[\s\S]*?<\/style>/gi, "");
+
+  for (const match of source.matchAll(/>([^<>]+)</g)) {
+    const text = decodeHtmlEntities(match[1]).replace(/\s+/g, " ").trim();
+
+    if (text.length < 2 || !/[a-z0-9]/i.test(text)) {
+      continue;
+    }
+
+    const key = text.toLowerCase();
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    snippets.push(text.slice(0, 100));
+
+    if (snippets.length >= 80) {
+      break;
+    }
+  }
+
+  return snippets;
+}
+
+function extractScopedClassTokens(html = "") {
+  const tokens = [];
+  const seen = new Set();
+
+  for (const match of String(html || "").matchAll(/\bclass\s*=\s*["']([^"']+)["']/gi)) {
+    for (const token of match[1].split(/\s+/)) {
+      const normalized = token.trim();
+
+      if (!normalized || seen.has(normalized)) {
+        continue;
+      }
+
+      seen.add(normalized);
+      tokens.push(normalized);
+
+      if (tokens.length >= 80) {
+        return tokens;
+      }
+    }
+  }
+
+  return tokens;
+}
+
+function countHtmlTags(html = "") {
+  return (String(html || "").match(/<\s*[a-z][\w:-]*(?:\s|>|\/)/gi) || []).length;
+}
+
+function buildScopedPreservationManifest(scope = {}) {
+  const html = String(scope?.html || "");
+
+  return {
+    targetChildCount: Number(scope?.childCount) || 0,
+    textSnippets: extractScopedTextSnippets(html).slice(0, 40),
+    classTokens: extractScopedClassTokens(html).slice(0, 40),
+    tagCount: countHtmlTags(html),
+  };
+}
+
+function promptAllowsScopedRemoval(prompt = "") {
+  return /\b(remove|delete|drop|clear|strip|erase|replace all|rewrite from scratch|start over)\b/i.test(String(prompt || ""));
+}
+
+function promptAllowsTextReplacement(prompt = "") {
+  return /\b(change|replace|rename|rewrite|edit|update)\b[^.]{0,40}\b(text|copy|wording|label|title|heading|headline|content)\b/i.test(
+    String(prompt || ""),
+  );
+}
+
+function analyzeScopedPreservation({ prompt = "", originalHtml = "", resultHtml = "" } = {}) {
+  const original = String(originalHtml || "");
+  const result = String(resultHtml || "");
+  const originalTagCount = countHtmlTags(original);
+  const resultTagCount = countHtmlTags(result);
+  const originalTextSnippets = extractScopedTextSnippets(original);
+  const resultText = normalizeContentText(result);
+  const originalClassTokens = extractScopedClassTokens(original);
+
+  const removalAllowed = promptAllowsScopedRemoval(prompt);
+  const textReplacementAllowed = promptAllowsTextReplacement(prompt);
+  const missingTextSnippets = textReplacementAllowed
+    ? []
+    : originalTextSnippets.filter((snippet) => !resultText.includes(normalizeContentText(snippet))).slice(0, 12);
+  const missingClassTokens = originalClassTokens
+    .filter((token) => !new RegExp(`\\bclass\\s*=\\s*["'][^"']*\\b${token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(result))
+    .slice(0, 12);
+  const reasons = [];
+
+  if (!result.trim()) {
+    reasons.push("The scoped response returned empty HTML.");
+  }
+
+  if (!removalAllowed && originalTagCount >= 6 && resultTagCount < Math.max(3, Math.floor(originalTagCount * 0.55))) {
+    reasons.push(`The scoped response returned too few elements (${resultTagCount} of ${originalTagCount}).`);
+  }
+
+  if (!removalAllowed && missingTextSnippets.length >= Math.max(2, Math.ceil(Math.min(originalTextSnippets.length, 10) * 0.35))) {
+    reasons.push("The scoped response removed meaningful existing text.");
+  }
+
+  if (!removalAllowed && originalClassTokens.length >= 4 && missingClassTokens.length >= Math.ceil(Math.min(originalClassTokens.length, 12) * 0.6)) {
+    reasons.push("The scoped response removed most existing class hooks.");
+  }
+
+  return {
+    ok: reasons.length === 0,
+    reasons,
+    missingTextSnippets,
+    missingClassTokens,
+    originalTagCount,
+    resultTagCount,
+  };
+}
+
 function buildFigmaImportSystemPrompt() {
   return [
     "You generate only front-end page content for UX Bridge previews.",
@@ -451,9 +595,11 @@ function buildCodexUserPrompt({
   includePageContext,
   scope = null,
   currentPreview = null,
+  repairContext = null,
 }) {
   const scopedEdit = scope?.type === "selected-layer" && scope.layerPath;
   const previewContext = scopedEdit ? compactCodexPreviewForPrompt(scope?.currentPreview) : compactCodexPreviewForPrompt(currentPreview);
+  const preservationManifest = scopedEdit ? buildScopedPreservationManifest(scope) : null;
   const contextLines = [
     `Project: ${projectName}`,
     `Page: ${pageName}`,
@@ -467,8 +613,11 @@ function buildCodexUserPrompt({
         `Target layer path: ${scope.layerPath}`,
         `Target layer label: ${scope.label || "selected layer"}`,
         `Target child count: ${Number(scope.childCount) || 0}`,
+        `Preservation manifest JSON: ${JSON.stringify(preservationManifest)}`,
         `Target current HTML subtree: ${String(scope.html || "").slice(0, 70000)}`,
         "Scope rule: edit only this selected layer and its children. Preserve every unrelated layer outside this subtree.",
+        "Preservation contract: the selected layer root, meaningful existing text, child cards, metrics, labels, badges, controls, and class hooks must remain unless the user explicitly asks to remove or replace them.",
+        "Allowed scoped additions: wrappers, hover labels, tooltips, chart bars/points, data attributes, ARIA attributes, and small scoped CSS/JS needed to complete the request.",
         "For scoped layout or spacing requests, preserve all existing child cards, text, metrics, labels, badges, and controls unless the user explicitly asks to remove them.",
         "If the user asks to make existing elements bigger, roomier, wider, taller, or more breathable, prefer CSS spacing/sizing changes and keep the selected layer's child structure intact.",
         "For scoped layout-only requests such as spacing, padding, sizing, or making cards roomier, return the original Target current HTML subtree unchanged and put the visual change in css.",
@@ -484,6 +633,17 @@ function buildCodexUserPrompt({
       : "Create or modify a page-scoped mobile UI concept for the current UX Bridge page.",
     contextLines.join("\n"),
     scopeLines.join("\n"),
+    repairContext
+      ? [
+          "Repair pass: the previous scoped response was rejected because it removed too much existing selected-layer content.",
+          `Rejected summary: ${String(repairContext?.summary || "").slice(0, 1000)}`,
+          `Rejected reasons: ${(repairContext?.analysis?.reasons || []).join(" ")}`,
+          `Missing text snippets: ${(repairContext?.analysis?.missingTextSnippets || []).join(" | ")}`,
+          `Missing class hooks: ${(repairContext?.analysis?.missingClassTokens || []).join(" | ")}`,
+          `Original tag count: ${repairContext?.analysis?.originalTagCount || 0}; returned tag count: ${repairContext?.analysis?.resultTagCount || 0}`,
+          "Return a corrected scoped response that keeps the original selected-layer content by default while still implementing the user's requested addition or visual change.",
+        ].join("\n")
+      : "",
     previewContext ? `Current preview context JSON: ${JSON.stringify(previewContext)}` : "",
     "Return JSON with keys: summary, html, css, js, assets.",
     "Use js for rich interactions such as toggles, filters, accordions, tab states, sliders, counters, or lightweight animation behavior.",
@@ -930,6 +1090,70 @@ async function runFigmaFastQaPass({
   }
 }
 
+async function repairScopedCodexResult({
+  apiKey,
+  responseFormat,
+  prompt,
+  projectName,
+  pageName,
+  includeProjectContext,
+  includePageContext,
+  scope,
+  currentPreview,
+  firstPass,
+  analysis,
+  allowEmptyScopedCss = false,
+}) {
+  try {
+    const parsed = await requestCodexStructuredPageResult({
+      apiKey,
+      requestBody: {
+        instructions: buildCodexSystemPrompt(),
+        input: buildCodexUserPrompt({
+          prompt,
+          projectName,
+          pageName,
+          includeProjectContext,
+          includePageContext,
+          scope,
+          currentPreview,
+          repairContext: {
+            summary: firstPass?.summary,
+            analysis,
+          },
+        }),
+        reasoning: {
+          effort: "low",
+        },
+        text: responseFormat,
+      },
+    });
+    const repaired = buildCodexPageResultFromParsed(parsed, firstPass?.summary, {
+      scoped: true,
+      allowEmptyCss: Boolean(allowEmptyScopedCss),
+    });
+    const repairedAnalysis = analyzeScopedPreservation({
+      prompt,
+      originalHtml: scope?.html,
+      resultHtml: repaired.html,
+    });
+
+    if (repairedAnalysis.ok) {
+      return repaired;
+    }
+
+    console.warn("[ux-bridge] Scoped Vibe repair still failed preservation checks", {
+      reasons: repairedAnalysis.reasons,
+    });
+  } catch (error) {
+    console.warn("[ux-bridge] Scoped Vibe repair skipped", {
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  return firstPass;
+}
+
 async function generateCodexPageResult({
   prompt,
   projectName,
@@ -1010,13 +1234,39 @@ async function generateCodexPageResult({
       allowEmptyCss: Boolean(allowEmptyScopedCss && scope?.type === "selected-layer" && scope.layerPath),
     },
   );
+  let result = firstPass;
+
+  if (!figmaImport && scope?.type === "selected-layer" && scope.layerPath) {
+    const analysis = analyzeScopedPreservation({
+      prompt,
+      originalHtml: scope.html,
+      resultHtml: firstPass.html,
+    });
+
+    if (!analysis.ok) {
+      result = await repairScopedCodexResult({
+        apiKey,
+        responseFormat,
+        prompt,
+        projectName,
+        pageName,
+        includeProjectContext,
+        includePageContext,
+        scope,
+        currentPreview,
+        firstPass,
+        analysis,
+        allowEmptyScopedCss: Boolean(allowEmptyScopedCss),
+      });
+    }
+  }
 
   return runFigmaFastQaPass({
     apiKey,
     projectName,
     pageName,
     figmaImport,
-    firstPass,
+    firstPass: result,
     responseFormat,
   });
 }
