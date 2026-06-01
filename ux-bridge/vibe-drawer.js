@@ -143,6 +143,114 @@
     return root.querySelector('[data-ux-layer-selected]:not([data-ux-layer-selected="false"])');
   }
 
+  function ensurePreviewLoadingOverlayStyles() {
+    if (document.getElementById("uxbridge-vibe-preview-loading-style")) {
+      return;
+    }
+
+    const style = document.createElement("style");
+    style.id = "uxbridge-vibe-preview-loading-style";
+    style.textContent = `
+      .vibe-preview-loading-overlay {
+        position: fixed;
+        z-index: 2147482500;
+        display: grid;
+        place-items: center;
+        pointer-events: none;
+        box-sizing: border-box;
+        background: rgba(255, 255, 255, 0.72);
+        backdrop-filter: blur(1.5px);
+        -webkit-backdrop-filter: blur(1.5px);
+        border-radius: 18px;
+        transition: opacity 120ms ease;
+      }
+
+      .vibe-preview-loading-overlay__card {
+        display: grid;
+        justify-items: center;
+        gap: 10px;
+        min-width: 132px;
+        padding: 18px 20px;
+        border: 1px solid rgba(164, 41, 236, 0.18);
+        border-radius: 20px;
+        background: rgba(255, 255, 255, 0.92);
+        box-shadow: 0 18px 48px rgba(15, 23, 42, 0.14);
+        color: #111827;
+        font-family: inherit;
+      }
+
+      .vibe-preview-loading-overlay__spinner {
+        width: 38px;
+        height: 38px;
+        border: 3px solid rgba(164, 41, 236, 0.18);
+        border-top-color: #a429ec;
+        border-radius: 999px;
+        animation: vibe-preview-loading-spin 800ms linear infinite;
+      }
+
+      .vibe-preview-loading-overlay__label {
+        margin: 0;
+        font-size: 13px;
+        font-weight: 800;
+        letter-spacing: 0;
+      }
+
+      @keyframes vibe-preview-loading-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  function showPreviewLoadingOverlay() {
+    const target = getSelectedPreviewElement() || getPreviewRenderRoot();
+
+    if (!target || !document.body.contains(target)) {
+      return () => {};
+    }
+
+    ensurePreviewLoadingOverlayStyles();
+
+    const overlay = document.createElement("div");
+    overlay.className = "vibe-preview-loading-overlay";
+    overlay.setAttribute("role", "status");
+    overlay.setAttribute("aria-live", "polite");
+    overlay.innerHTML = `
+      <div class="vibe-preview-loading-overlay__card">
+        <div class="vibe-preview-loading-overlay__spinner" aria-hidden="true"></div>
+        <p class="vibe-preview-loading-overlay__label">Designing</p>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+
+    let frame = 0;
+    const positionOverlay = () => {
+      if (!document.body.contains(overlay) || !document.body.contains(target)) {
+        return;
+      }
+
+      const rect = target.getBoundingClientRect();
+      overlay.style.left = `${rect.left}px`;
+      overlay.style.top = `${rect.top}px`;
+      overlay.style.width = `${rect.width}px`;
+      overlay.style.height = `${rect.height}px`;
+      overlay.style.borderRadius = window.getComputedStyle(target).borderRadius || "18px";
+      frame = window.requestAnimationFrame(positionOverlay);
+    };
+
+    positionOverlay();
+
+    return () => {
+      if (frame) {
+        window.cancelAnimationFrame(frame);
+      }
+
+      overlay.remove();
+    };
+  }
+
   function getPreviewLayerPathForElement(element) {
     const container = getPreviewRenderContainer();
 
@@ -1506,11 +1614,14 @@
     state.loading = true;
     state.error = "";
     renderDrawer();
+    let hidePreviewLoadingOverlay = () => {};
 
     try {
       if (!(await ensureActiveSession())) {
         return;
       }
+
+      hidePreviewLoadingOverlay = showPreviewLoadingOverlay();
 
       if (usesLocalBridge()) {
         await generateDraftViaLocalBridge();
@@ -1551,6 +1662,7 @@
       state.error = error instanceof Error ? error.message : "Unable to generate page content.";
       renderDrawer();
     } finally {
+      hidePreviewLoadingOverlay();
       state.loading = false;
       renderDrawer();
     }
