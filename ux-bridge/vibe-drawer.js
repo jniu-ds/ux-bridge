@@ -1614,12 +1614,14 @@
     state.loading = true;
     state.error = "";
     renderDrawer();
-    const hidePreviewLoadingOverlay = showPreviewLoadingOverlay();
+    let hidePreviewLoadingOverlay = () => {};
 
     try {
       if (!(await ensureActiveSession())) {
         return;
       }
+
+      hidePreviewLoadingOverlay = showPreviewLoadingOverlay();
 
       if (usesLocalBridge()) {
         await generateDraftViaLocalBridge();
